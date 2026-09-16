@@ -1,0 +1,7 @@
+/.idea
+/.kiro
+dependency-reduced-pom.xml
+fabric-installer-1.1.2.jar
+/target
+settings.json
+profiles.json
