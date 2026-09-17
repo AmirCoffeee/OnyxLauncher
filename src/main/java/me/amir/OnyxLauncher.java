@@ -24,6 +24,7 @@ import java.awt.TrayIcon;
 import java.awt.image.BufferedImage;
 import java.io.*;
 import java.lang.management.ManagementFactory;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -205,6 +206,7 @@ public class OnyxLauncher extends Application {
 
         // bottom bar
         usernameBtn = btn("Select Account","btn","btn-account");
+        usernameBtn.setMnemonicParsing(false);
         if (!settings.getUsername().isEmpty()) usernameBtn.setText(settings.getUsername());
         profileBtn = btn(activeProfile.getName()+" ▾","btn","btn-profile");
         profileBtn.setStyle("-fx-background-color:"+activeProfile.getColor()+";");
@@ -218,7 +220,7 @@ public class OnyxLauncher extends Application {
         Region s2=new Region(); HBox.setHgrow(s2,Priority.ALWAYS);
         HBox bar = new HBox(10,usernameBtn,s1,profileBtn,s2,manageBtn,installBtn,settingsBtn,playBtn);
         bar.setAlignment(Pos.CENTER_LEFT);
-        Label credit = new Label("OnyxLauncher  •  AmirCoffee");
+        Label credit = new Label("OnyxLauncher  •  AmirCoffee  •  mamadjavad_YT");
         credit.getStyleClass().add("label-hint");
         VBox bottom = new VBox(6,bar,credit);
         bottom.getStyleClass().add("bottom-bar");
@@ -278,17 +280,72 @@ public class OnyxLauncher extends Application {
     // =========================================================================
     private void refreshAccountPopup() {
         accountPopup.getChildren().clear();
-        Label h=new Label("Accounts"); h.getStyleClass().add("popup-header");
+        Label h = new Label("Accounts"); h.getStyleClass().add("popup-header");
         accountPopup.getChildren().add(h);
-        for(String u:settings.getUsernameHistory()){
-            boolean active=u.equals(settings.getUsername());
-            Button b=popupItem(u,active?"#1db954":"#cccccc");
-            b.setOnAction(e->{settings.setUsername(u);settings.save();usernameBtn.setText(u);accountPopup.setVisible(false);});
-            accountPopup.getChildren().add(b);
+
+        for (String u : settings.getUsernameHistory()) {
+            boolean active = u.equals(settings.getUsername());
+
+            // Name button — white when not active, green when active
+            Button b = popupItem(u, active ? "#1db954" : "#ffffff");
+            b.setOnAction(e -> {
+                settings.setUsername(u);
+                settings.save();
+                usernameBtn.setMnemonicParsing(false);
+                usernameBtn.setText(u);
+                accountPopup.setVisible(false);
+                refreshAccountPopup();  // re-render so colors update
+            });
+
+            // Delete button — small ✕ on the right
+            Button del = new Button("✕");
+            del.setStyle(
+                "-fx-background-color:transparent;" +
+                "-fx-text-fill:#555;" +
+                "-fx-font-size:11px;" +
+                "-fx-padding:2 6;" +
+                "-fx-cursor:hand;"
+            );
+            del.setOnMouseEntered(ev -> del.setStyle(
+                "-fx-background-color:transparent;" +
+                "-fx-text-fill:#e53935;" +
+                "-fx-font-size:11px;" +
+                "-fx-padding:2 6;" +
+                "-fx-cursor:hand;"
+            ));
+            del.setOnMouseExited(ev -> del.setStyle(
+                "-fx-background-color:transparent;" +
+                "-fx-text-fill:#555;" +
+                "-fx-font-size:11px;" +
+                "-fx-padding:2 6;" +
+                "-fx-cursor:hand;"
+            ));
+            del.setOnAction(e -> {
+                settings.getUsernameHistory().remove(u);
+                // If we deleted the active account, clear it or pick next
+                if (active) {
+                    String next = settings.getUsernameHistory().isEmpty()
+                        ? "" : settings.getUsernameHistory().get(0);
+                    settings.setUsername(next);
+                    usernameBtn.setMnemonicParsing(false);
+                    usernameBtn.setText(next.isEmpty() ? "Select Account" : next);
+                }
+                settings.save();
+                refreshAccountPopup();
+            });
+
+            HBox row = new HBox(del);
+            row.setAlignment(Pos.CENTER_RIGHT);
+            HBox.setHgrow(b, Priority.ALWAYS);
+            b.setMaxWidth(Double.MAX_VALUE);
+            HBox item = new HBox(0, b, del);
+            item.setAlignment(Pos.CENTER_LEFT);
+            accountPopup.getChildren().add(item);
         }
+
         accountPopup.getChildren().add(new Separator());
-        Button add=popupItem("+ Add Account","#1db954");
-        add.setOnAction(e->{accountPopup.setVisible(false);openAddAccount();});
+        Button add = popupItem("+ Add Account", "#1db954");
+        add.setOnAction(e -> { accountPopup.setVisible(false); openAddAccount(); });
         accountPopup.getChildren().add(add);
     }
 
@@ -349,7 +406,7 @@ public class OnyxLauncher extends Application {
             String name=field.getText().trim();
             if(!name.isEmpty()){
                 settings.setUsername(name); settings.addUsernameToHistory(name); settings.save();
-                usernameBtn.setText(name); refreshAccountPopup();
+                usernameBtn.setMnemonicParsing(false); usernameBtn.setText(name); refreshAccountPopup();
                 slotOverlay.setVisible(false);
             }
         });
@@ -365,25 +422,169 @@ public class OnyxLauncher extends Application {
     // Settings page
     // =========================================================================
     private void buildSettings(Stage stage) {
-        VBox content = new VBox(16);
-        content.setPadding(new Insets(28,32,28,32));
+        VBox content = new VBox(24);
+        content.setPadding(new Insets(28, 36, 36, 36));
         content.setStyle("-fx-background-color:#111111;");
 
-        Label title=new Label("Settings"); title.setStyle("-fx-text-fill:white;-fx-font-size:20px;-fx-font-weight:bold;");
-        Button back=btn("← Back","btn","btn-back"); hover(back); back.setOnAction(e->showPage(slotMain));
-        BorderPane hdr=new BorderPane(); hdr.setLeft(title); hdr.setRight(back);
+        // ── Header ────────────────────────────────────────────────────────────
+        Label title = new Label("Settings");
+        title.setStyle("-fx-text-fill:white;-fx-font-size:22px;-fx-font-weight:bold;");
+        Button back = btn("← Back", "btn", "btn-back"); hover(back);
+        back.setOnAction(e -> showPage(slotMain));
+        BorderPane hdr = new BorderPane(); hdr.setLeft(title); hdr.setRight(back);
 
-        Label lbl=sLbl("Default .minecraft Path  (blank = auto-detect)");
-        TextField pathF=field(settings.getCustomMcPath(),"Leave blank for default");
-        Button browse=btn("Browse…","btn","btn-dark"); hover(browse);
-        browse.setOnAction(e->{DirectoryChooser dc=new DirectoryChooser(); File d=dc.showDialog(stage); if(d!=null)pathF.setText(d.getAbsolutePath());});
-        HBox row=new HBox(8,pathF,browse); HBox.setHgrow(pathF,Priority.ALWAYS);
+        // ── Default .minecraft path ───────────────────────────────────────────
+        Label pathLbl = sLbl("Default .minecraft Path  (blank = auto-detect)");
+        TextField pathF = field(settings.getCustomMcPath(), "Leave blank for default");
+        Button browse = btn("Browse…", "btn", "btn-dark"); hover(browse);
+        browse.setOnAction(e -> {
+            DirectoryChooser dc = new DirectoryChooser();
+            File d = dc.showDialog(stage);
+            if (d != null) pathF.setText(d.getAbsolutePath());
+        });
+        HBox pathRow = new HBox(8, pathF, browse);
+        HBox.setHgrow(pathF, Priority.ALWAYS);
 
-        Button save=btn("Save & Back","btn","btn-primary"); save.setPrefHeight(40); hover(save);
-        save.setOnAction(e->{settings.setCustomMcPath(pathF.getText().trim()); settings.save(); showPage(slotMain);});
+        // ── GPU Selector ──────────────────────────────────────────────────────
+        Label gpuTitle = new Label("Graphics Card");
+        gpuTitle.setStyle("-fx-text-fill:white;-fx-font-size:16px;-fx-font-weight:bold;");
+        Label gpuSubtitle = new Label("Select which GPU every Minecraft launch will use");
+        gpuSubtitle.setStyle("-fx-text-fill:#888;-fx-font-size:12px;");
+        VBox gpuHeader = new VBox(3, gpuTitle, gpuSubtitle);
 
-        content.getChildren().addAll(hdr,lbl,row,new Separator(),save);
-        ScrollPane sp=new ScrollPane(content); sp.setFitToWidth(true); sp.getStyleClass().add("scroll-pane");
+        List<String> rawGpus    = GameRunner.detectGpus();
+        String       savedGpu   = settings.getGpuMode();
+        ToggleGroup  gpuGroup   = new ToggleGroup();
+        // Prevent deselecting all — exactly one must always be selected
+        gpuGroup.selectedToggleProperty().addListener((obs, oldT, newT) -> {
+            if (newT == null) gpuGroup.selectToggle(oldT);
+        });
+        List<ToggleButton> gpuBtns = new ArrayList<>();
+
+        FlowPane gpuCards = new FlowPane(14, 14);
+        gpuCards.setStyle("-fx-padding:4 0 0 0;");
+
+        for (String entry : rawGpus) {
+            String[] parts     = entry.split("\\|", 2);
+            String   typeKey   = parts[0];
+            String   rawName   = parts.length > 1 ? parts[1] : typeKey;
+            // Strip noisy vendor prefixes
+            rawName = rawName
+                .replaceAll("(?i)^Intel Corporation\\s+", "")
+                .replaceAll("(?i)^NVIDIA Corporation\\s+", "")
+                .replaceAll("(?i)^Advanced Micro Devices.*?\\]\\s*", "");
+            if (rawName.length() > 52) rawName = rawName.substring(0, 52) + "...";
+            final String gpuName = rawName;
+
+            boolean isDiscrete = typeKey.equals("dgpu");
+            String  accentCol  = isDiscrete ? "#1db954" : "#2196F3";
+            String  typeLabel  = isDiscrete ? "Discrete GPU" : "Integrated GPU";
+
+            ToggleButton tb = new ToggleButton();
+            tb.setToggleGroup(gpuGroup);
+            tb.setUserData(entry);
+            tb.setCursor(javafx.scene.Cursor.HAND);
+            tb.setFocusTraversable(true);
+
+            // Card content
+            Label nameLbl = new Label(gpuName);
+            nameLbl.setStyle("-fx-text-fill:#efefef;-fx-font-size:13px;-fx-font-weight:bold;");
+            nameLbl.setWrapText(true);
+            nameLbl.setMaxWidth(220);
+
+            Label typeLbl = new Label(typeLabel);
+            typeLbl.setStyle(
+                "-fx-text-fill:" + accentCol + ";" +
+                "-fx-font-size:11px;-fx-font-weight:bold;" +
+                "-fx-background-color:" + accentCol + "22;" +
+                "-fx-padding:2 8;-fx-background-radius:4;"
+            );
+
+            VBox inner = new VBox(7, nameLbl, typeLbl);
+            inner.setAlignment(Pos.CENTER_LEFT);
+            inner.setMouseTransparent(true);
+            tb.setGraphic(inner);
+            tb.setMinWidth(220);
+            tb.setPrefHeight(68);
+
+            // Pre-select: "auto"/empty → first dgpu; if none exists → first igpu
+            boolean hasDgpu = rawGpus.stream().anyMatch(g -> g.startsWith("dgpu|"));
+            boolean sel;
+            if (savedGpu.equals("auto") || savedGpu.isEmpty()) {
+                if (hasDgpu) {
+                    sel = isDiscrete && rawGpus.stream()
+                            .filter(g -> g.startsWith("dgpu|"))
+                            .findFirst().map(g -> g.equals(entry)).orElse(false);
+                } else {
+                    sel = !isDiscrete && rawGpus.stream()
+                            .filter(g -> g.startsWith("igpu|"))
+                            .findFirst().map(g -> g.equals(entry)).orElse(false);
+                }
+            } else {
+                sel = savedGpu.equals(entry)
+                    || (savedGpu.startsWith("dgpu") && isDiscrete
+                        && rawGpus.stream().filter(g -> g.startsWith("dgpu|"))
+                                  .findFirst().map(g -> g.equals(entry)).orElse(false))
+                    || (savedGpu.startsWith("igpu") && !isDiscrete
+                        && rawGpus.stream().filter(g -> g.startsWith("igpu|"))
+                                  .findFirst().map(g -> g.equals(entry)).orElse(false));
+            }
+            if (sel) tb.setSelected(true);
+
+            final String ac = accentCol;
+            // Refresh all card styles when selection changes
+            tb.selectedProperty().addListener((obs, was, now) -> {
+                for (ToggleButton b : gpuBtns) {
+                    boolean s  = b.isSelected();
+                    String  ba = s ? (((String) b.getUserData()).startsWith("dgpu") ? "#1db954" : "#2196F3") : "#2a2a2a";
+                    b.setStyle(
+                        "-fx-background-color:" + (s ? "#0e2018" : "#191919") + ";" +
+                        "-fx-border-color:" + ba + ";" +
+                        "-fx-border-width:2;-fx-border-radius:8;" +
+                        "-fx-background-radius:8;-fx-padding:12 18;"
+                    );
+                }
+            });
+
+            gpuBtns.add(tb);
+            gpuCards.getChildren().add(tb);
+        }
+
+        // Apply initial styles
+        for (ToggleButton b : gpuBtns) {
+            boolean s  = b.isSelected();
+            String  ba = s ? (((String) b.getUserData()).startsWith("dgpu") ? "#1db954" : "#2196F3") : "#2a2a2a";
+            b.setStyle(
+                "-fx-background-color:" + (s ? "#0e2018" : "#191919") + ";" +
+                "-fx-border-color:" + ba + ";" +
+                "-fx-border-width:2;-fx-border-radius:8;" +
+                "-fx-background-radius:8;-fx-padding:12 18;"
+            );
+        }
+
+        // ── Save ──────────────────────────────────────────────────────────────
+        Button save = btn("Save & Back", "btn", "btn-primary");
+        save.setPrefHeight(44); save.setPrefWidth(160); hover(save);
+        save.setOnAction(e -> {
+            settings.setCustomMcPath(pathF.getText().trim());
+            Toggle selGpu = gpuGroup.getSelectedToggle();
+            if (selGpu != null) settings.setGpuMode((String) selGpu.getUserData());
+            settings.save();
+            showPage(slotMain);
+        });
+
+        content.getChildren().addAll(
+            hdr,
+            new Separator(),
+            pathLbl, pathRow,
+            new Separator(),
+            gpuHeader, gpuCards,
+            new Separator(),
+            save
+        );
+        ScrollPane sp = new ScrollPane(content);
+        sp.setFitToWidth(true);
+        sp.getStyleClass().add("scroll-pane");
         setSlot(slotSettings, sp);
     }
 
@@ -456,8 +657,8 @@ public class OnyxLauncher extends Application {
         Tab tab=new Tab("Fabric");
         VBox box=new VBox(14); box.setPadding(new Insets(18,24,18,24)); box.setStyle("-fx-background-color:#111111;");
 
-        installMcCombo=new ComboBox<>(); installMcCombo.setPrefWidth(280); installMcCombo.setPromptText("Minecraft Version…");
-        installLoaderCombo=new ComboBox<>(); installLoaderCombo.setPrefWidth(280); installLoaderCombo.setPromptText("Loader Version…");
+        installMcCombo=new ComboBox<>(); installMcCombo.setPrefWidth(280); installMcCombo.setPromptText("Minecraft Version…"); installMcCombo.setVisibleRowCount(8); limitComboHeight(installMcCombo, 8);
+        installLoaderCombo=new ComboBox<>(); installLoaderCombo.setPrefWidth(280); installLoaderCombo.setPromptText("Loader Version…"); installLoaderCombo.setVisibleRowCount(8); limitComboHeight(installLoaderCombo, 8);
         installBar=new ProgressBar(0); installBar.setPrefWidth(Double.MAX_VALUE); installBar.setVisible(false);
         installBar.getStyleClass().addAll("progress-bar","fabric");
         installStatus=new Label(); installStatus.getStyleClass().add("label-hint"); installStatus.setVisible(false);
@@ -529,9 +730,10 @@ public class OnyxLauncher extends Application {
         card.setStyle("-fx-border-color:"+p.getColor()+";"
             + (isActive ? "-fx-effect:dropshadow(gaussian,"+p.getColor()+",12,0.4,0,0);" : ""));
 
-        // icon: Minecraft grass block emoji + active indicator
-        Label icon = new Label(isActive ? "🟢" : "⬜");
-        icon.setStyle("-fx-font-size:22px;");
+        // icon: colored dot — green for active, grey for inactive
+        Label icon = new Label("●");
+        icon.setStyle("-fx-font-size:16px;-fx-text-fill:" + (isActive ? "#1db954" : "#333333") + ";"
+            + "-fx-padding:3 4 0 0;");
 
         // active badge
         Label activeBadge = new Label(isActive ? " ACTIVE" : "");
@@ -632,9 +834,11 @@ public class OnyxLauncher extends Application {
 
         // ── Minecraft Version ─────────────────────────────────────────────────
         ComboBox<String> verCombo = new ComboBox<>();
-        verCombo.setEditable(true);
-        verCombo.setMaxWidth(Double.MAX_VALUE);   // fill available width
-        verCombo.setPromptText("Select or type version…");
+        verCombo.setEditable(false);
+        verCombo.setMaxWidth(Double.MAX_VALUE);
+        verCombo.setVisibleRowCount(8);
+        limitComboHeight(verCombo, 8);
+        verCombo.setPromptText("Select a version…");
         // populate from installed versions
         File vd = new File(AppConfig.getMinecraftDir(), "versions");
         if (vd.isDirectory()) {
@@ -732,11 +936,14 @@ public class OnyxLauncher extends Application {
         Region rSp = new Region(); HBox.setHgrow(rSp, Priority.ALWAYS);
         HBox resRow = new HBox(8, resW, xLbl, resH, rSp, fsBox); resRow.setAlignment(Pos.CENTER_LEFT);
 
+
         // ── Java executable ───────────────────────────────────────────────────
         // Scan /usr/lib/jvm for available JVMs
         ComboBox<String> javaCombo = new ComboBox<>();
         javaCombo.setEditable(true);
         javaCombo.setMaxWidth(Double.MAX_VALUE);
+        javaCombo.setVisibleRowCount(6);
+        limitComboHeight(javaCombo, 6);
         javaCombo.setPromptText("Auto-detect (recommended)");
         // add "Auto" option
         javaCombo.getItems().add("Auto-detect");
@@ -966,6 +1173,7 @@ public class OnyxLauncher extends Application {
     }
     private Button popupItem(String text, String color) {
         Button b=new Button(text); b.setMaxWidth(Double.MAX_VALUE);
+        b.setMnemonicParsing(false);
         b.getStyleClass().add("popup-item");
         b.setStyle("-fx-text-fill:"+color+";"); return b;
     }
@@ -978,6 +1186,37 @@ public class OnyxLauncher extends Application {
     private void alert(String title, String msg) {
         Alert a=new Alert(Alert.AlertType.INFORMATION);
         a.setTitle(title); a.setHeaderText(null); a.setContentText(msg); a.showAndWait();
+    }
+
+
+    /**
+     * Limits the dropdown popup of a ComboBox to a fixed number of visible rows.
+     * Must be called after the ComboBox is added to a scene (use setOnShowing).
+     */
+    private static void limitComboHeight(ComboBox<?> combo, int maxRows) {
+        combo.setVisibleRowCount(maxRows);
+        combo.showingProperty().addListener((obs, wasShowing, isShowing) -> {
+            if (isShowing) {
+                // Reach into the skin's ListView and clamp its height
+                javafx.scene.control.skin.ComboBoxListViewSkin<?> skin =
+                    (javafx.scene.control.skin.ComboBoxListViewSkin<?>) combo.getSkin();
+                if (skin != null) {
+                    javafx.scene.Node popup = skin.getPopupContent();
+                    if (popup instanceof javafx.scene.control.ListView<?> lv) {
+                        double rowH = 30;
+                        lv.setMaxHeight(maxRows * rowH);
+                        lv.setPrefHeight(Math.min(combo.getItems().size(), maxRows) * rowH);
+                    }
+                }
+            }
+        });
+    }
+
+    /** Highlights a GPU card as selected (bold border + darker bg). */
+    private static void applyGpuCardSelected(VBox card, String color) {
+        card.setStyle("-fx-background-color:#1a1a1a;-fx-background-radius:8;"
+            + "-fx-border-radius:8;-fx-border-width:2;"
+            + "-fx-border-color:" + color + ";-fx-cursor:hand;");
     }
 
     public static void main(String[] args) { launch(args); }

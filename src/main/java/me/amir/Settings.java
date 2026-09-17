@@ -26,6 +26,12 @@ public class Settings {
     // ── Global .minecraft override (used when profile has no custom gameDir) ──
     private String customMcPath = "";
 
+    // ── GPU mode (global – applies to every launch) ───────────────────────────
+    // "auto"     → pick first discrete GPU if available
+    // "dgpu|..." → force that specific discrete GPU
+    // "igpu|..." → force that specific integrated GPU
+    private String gpuMode = "auto";
+
     // ─────────────────────────────────────────────────────────────────────────
     // Persistence
     // ─────────────────────────────────────────────────────────────────────────
@@ -66,6 +72,9 @@ public class Settings {
 
     public String getCustomMcPath()                 { return customMcPath != null ? customMcPath : ""; }
     public void   setCustomMcPath(String p)         { this.customMcPath = p; }
+
+    public String getGpuMode()                      { return gpuMode != null ? gpuMode : "auto"; }
+    public void   setGpuMode(String m)              { this.gpuMode = m; }
 
     // ── Back-compat stubs (so AppConfig still compiles unchanged) ─────────────
     /** @deprecated Use Profile.effectiveGameDir() */

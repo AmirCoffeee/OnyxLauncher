@@ -35,7 +35,7 @@ public class GameRunner {
 
         return launch(username, version, ramMB, extra, mcDir,
                 profile.isFullscreen(), profile.getResWidth(), profile.getResHeight(),
-                javaPath);
+                javaPath, Settings.load().getGpuMode());
     }
 
     public static Process launchGame(String username, String version,
@@ -45,7 +45,7 @@ public class GameRunner {
         String javaPath = getJavaPath(javaVer);
         Settings s      = Settings.load();
         return launch(username, version, ramMB, extraArgs, mcDir,
-                s.isFullscreen(), s.getResWidth(), s.getResHeight(), javaPath);
+                s.isFullscreen(), s.getResWidth(), s.getResHeight(), javaPath, "auto");
     }
 
     // -------------------------------------------------------------------------
@@ -55,7 +55,7 @@ public class GameRunner {
     private static Process launch(String username, String version, int ramMB,
                                   String extraArgs, String mcDir,
                                   boolean fullscreen, int resW, int resH,
-                                  String javaPath) throws Exception {
+                                  String javaPath, String gpuMode) throws Exception {
 
         String globalDir = AppConfig.getMinecraftDir();
 
@@ -178,8 +178,103 @@ public class GameRunner {
             pb.environment().put("_JAVA_AWT_WM_NONREPARENTING", "1");
             pb.environment().put("GDK_BACKEND", "x11");
             pb.environment().put("XLIB_SKIP_ARGB_VISUALS", "1");
+
+            // ── GPU selection based on profile gpuMode ────────────────────────
+            // Normalise: treat any string starting with "dgpu" or containing
+            // "nvidia"/"rtx"/"gtx"/"radeon" (but not "intel") as discrete GPU.
+            String gm = (gpuMode == null) ? "auto" : gpuMode.toLowerCase();
+            boolean forceDgpu = gm.startsWith("dgpu")
+                || (!gm.startsWith("igpu") && !gm.equals("auto")
+                    && (gm.contains("nvidia") || gm.contains("rtx") || gm.contains("gtx")
+                        || (gm.contains("radeon") && !gm.contains("intel"))));
+            boolean forceIgpu = gm.startsWith("igpu")
+                || (!forceDgpu && (gm.contains("intel") || gm.contains("integrated")));
+
+            if (forceIgpu) {
+                // Explicitly use integrated GPU — remove any PRIME/NVIDIA vars
+                pb.environment().put("DRI_PRIME", "0");
+                pb.environment().remove("__NV_PRIME_RENDER_OFFLOAD");
+                pb.environment().remove("__NV_PRIME_RENDER_OFFLOAD_PROVIDER");
+                pb.environment().remove("__GLX_VENDOR_LIBRARY_NAME");
+                pb.environment().remove("__VK_LAYER_NV_optimus");
+                System.out.println("[GameRunner] GPU mode: iGPU (Integrated)");
+            } else {
+                // "auto" or explicit dgpu → force discrete NVIDIA RTX via PRIME offload
+                pb.environment().put("__NV_PRIME_RENDER_OFFLOAD", "1");
+                pb.environment().put("__NV_PRIME_RENDER_OFFLOAD_PROVIDER", "NVIDIA-G0");
+                pb.environment().put("__GLX_VENDOR_LIBRARY_NAME", "nvidia");
+                pb.environment().put("__VK_LAYER_NV_optimus", "NVIDIA_only");
+                pb.environment().put("DRI_PRIME", "1");
+                System.out.println("[GameRunner] GPU mode: dGPU (NVIDIA PRIME offload)  [" + gpuMode + "]");
+            }
         }
         return pb.start();
+    }
+
+    // -------------------------------------------------------------------------
+    // GPU discovery  (Linux only)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returned item format:  "dgpu|NVIDIA GeForce RTX 4060 Laptop GPU"
+     *                     or "igpu|Intel Iris Xe Graphics"
+     * First token is the type key used by gpuMode, second is the display label.
+     */
+    public static List<String> detectGpus() {
+        List<String> gpus = new ArrayList<>();
+        // Try lspci to enumerate GPUs
+        try {
+            Process p = new ProcessBuilder("lspci").redirectErrorStream(true).start();
+            new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()))
+                .lines().forEach(line -> {
+                    String l = line.toLowerCase();
+                    if (!l.contains("vga") && !l.contains("3d controller") && !l.contains("display controller")) return;
+                    // Extract the description after the first ':'  (lspci format: "XX:XX.X Class: Vendor Name")
+                    String desc = line.contains(":") ? line.substring(line.indexOf(':') + 1).trim() : line;
+                    // strip leading "VGA compatible controller: " etc.
+                    if (desc.contains(": ")) desc = desc.substring(desc.indexOf(": ") + 2).trim();
+                    String lower = desc.toLowerCase();
+                    if (lower.contains("nvidia")) {
+                        gpus.add("dgpu|" + desc);
+                    } else if (lower.contains("intel") || lower.contains("integrated") || lower.contains("uhd") || lower.contains("iris")) {
+                        gpus.add("igpu|" + desc);
+                    } else if (lower.contains("amd") || lower.contains("radeon")) {
+                        gpus.add("dgpu|" + desc);
+                    } else {
+                        gpus.add("igpu|" + desc);
+                    }
+                });
+        } catch (Exception ignored) {}
+
+        // Fallback: check /sys/class/drm for card names
+        if (gpus.isEmpty()) {
+            File drm = new File("/sys/class/drm");
+            if (drm.isDirectory()) {
+                File[] cards = drm.listFiles(f -> f.getName().matches("card\\d+"));
+                if (cards != null) {
+                    for (File card : cards) {
+                        File label = new File(card, "device/product_name");
+                        if (!label.exists()) label = new File(card, "device/label");
+                        if (label.exists()) {
+                            try {
+                                String name = new String(java.nio.file.Files.readAllBytes(label.toPath())).trim();
+                                String lower = name.toLowerCase();
+                                if (lower.contains("nvidia")) gpus.add("dgpu|" + name);
+                                else                          gpus.add("igpu|" + name);
+                            } catch (Exception ignored) {}
+                        }
+                    }
+                }
+            }
+        }
+
+        // Always ensure at least two canonical entries exist
+        boolean hasIgpu = gpus.stream().anyMatch(g -> g.startsWith("igpu|"));
+        boolean hasDgpu = gpus.stream().anyMatch(g -> g.startsWith("dgpu|"));
+        if (!hasIgpu) gpus.add(0, "igpu|Integrated GPU (Intel/AMD)");
+        if (!hasDgpu) gpus.add("dgpu|Discrete GPU (NVIDIA/AMD)");
+
+        return gpus;
     }
 
     // -------------------------------------------------------------------------
