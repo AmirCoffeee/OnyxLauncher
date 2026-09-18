@@ -940,7 +940,7 @@ public class OnyxLauncher extends Application {
         // ── Java executable ───────────────────────────────────────────────────
         // Scan /usr/lib/jvm for available JVMs
         ComboBox<String> javaCombo = new ComboBox<>();
-        javaCombo.setEditable(true);
+        javaCombo.setEditable(false);
         javaCombo.setMaxWidth(Double.MAX_VALUE);
         javaCombo.setVisibleRowCount(6);
         limitComboHeight(javaCombo, 6);
