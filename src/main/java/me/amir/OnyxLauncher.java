@@ -93,13 +93,21 @@ public class OnyxLauncher extends Application {
         catch (Exception ignored) {}
         Platform.setImplicitExit(false);
 
+        // ── Load embedded fonts (works offline, font is inside the JAR) ───────
+        loadFont("/fonts/Ubuntu-Regular.ttf");
+        loadFont("/fonts/Ubuntu-Medium.ttf");
+        loadFont("/fonts/Ubuntu-Bold.ttf");
+
         // build popup layer
         accountPopup = popupCard();
         profilePopup = popupCard();
         popupLayer   = new AnchorPane(accountPopup, profilePopup);
         popupLayer.setPickOnBounds(false);
 
-        // build all pages into their slots
+        // build shell (sidebar + page area) first
+        buildShell(stage);
+
+        // build all page contents into their nodes
         buildMain(stage);
         buildSettings(stage);
         buildInstall();
@@ -108,15 +116,12 @@ public class OnyxLauncher extends Application {
         buildContentManager(null);
         buildOverlay();
 
-        // assemble root
-        rootStack = new StackPane(
-            slotMain, slotSettings, slotInstall,
-            slotProfileList, slotProfileEdit, slotContentManager,
-            slotOverlay, popupLayer
-        );
-        rootStack.setStyle("-fx-background-color:#111111;");
+        // pageArea starts showing main
+        navigateTo(slotMain, sideHomeBtn);
 
-        showPage(slotMain);
+        // assemble root: shell fills everything, overlay floats on top
+        rootStack = new StackPane(shell, slotOverlay, popupLayer);
+        rootStack.setStyle("-fx-background-color:#111111;");
 
         Scene scene = new Scene(rootStack, 1060, 640);
         try { scene.getStylesheets().add(
@@ -133,20 +138,76 @@ public class OnyxLauncher extends Application {
     }
 
     // =========================================================================
-    // Navigation  – only touches visibility, never adds/removes from rootStack
+    // Navigation
     // =========================================================================
-    private void showPage(StackPane slot) {
-        slotMain.setVisible(false);
-        slotSettings.setVisible(false);
-        slotInstall.setVisible(false);
-        slotProfileList.setVisible(false);
-        slotProfileEdit.setVisible(false);
-        slotContentManager.setVisible(false);
-        slotOverlay.setVisible(false);
-        // popupLayer always visible, overlayView handled separately
-        slot.setVisible(true);
+
+    /** Switches the visible page inside pageArea and updates sidebar highlight. */
+    private void navigateTo(StackPane slot, Button sideBtn) {
         accountPopup.setVisible(false);
         profilePopup.setVisible(false);
+        if (sideBtn != null) setSideActive(sideBtn);
+        animatePageTransition(slot);
+    }
+
+    /**
+     * Legacy helper — navigates without changing sidebar highlight.
+     * Used for sub-pages (ProfileEdit, ContentManager) that are not
+     * directly reachable from the sidebar.
+     */
+    private void showPage(StackPane slot) {
+        accountPopup.setVisible(false);
+        profilePopup.setVisible(false);
+        animatePageTransition(slot);
+    }
+
+    /**
+     * Fade-out current page → swap → fade-in + slide-up new page.
+     * Total duration: ~220 ms — fast enough to feel snappy, slow enough to feel smooth.
+     */
+    private void animatePageTransition(StackPane next) {
+        if (pageArea.getChildren().isEmpty()) {
+            // first load — just show
+            next.setVisible(true);
+            pageArea.getChildren().setAll(next);
+            return;
+        }
+
+        Node current = pageArea.getChildren().get(0);
+
+        // If already showing the same page, do nothing
+        if (current == next) return;
+
+        // ── Fade-out current ──────────────────────────────────────────────────
+        javafx.animation.FadeTransition fadeOut =
+            new javafx.animation.FadeTransition(Duration.millis(90), current);
+        fadeOut.setFromValue(1.0);
+        fadeOut.setToValue(0.0);
+
+        fadeOut.setOnFinished(e -> {
+            // ── Swap ──────────────────────────────────────────────────────────
+            next.setVisible(true);
+            next.setOpacity(0);
+            next.setTranslateY(10);
+            pageArea.getChildren().setAll(next);
+
+            // ── Fade-in + slide-up new page ───────────────────────────────────
+            javafx.animation.FadeTransition fadeIn =
+                new javafx.animation.FadeTransition(Duration.millis(160), next);
+            fadeIn.setFromValue(0.0);
+            fadeIn.setToValue(1.0);
+
+            javafx.animation.TranslateTransition slideUp =
+                new javafx.animation.TranslateTransition(Duration.millis(160), next);
+            slideUp.setFromY(10);
+            slideUp.setToY(0);
+            slideUp.setInterpolator(javafx.animation.Interpolator.EASE_OUT);
+
+            javafx.animation.ParallelTransition enter =
+                new javafx.animation.ParallelTransition(fadeIn, slideUp);
+            enter.play();
+        });
+
+        fadeOut.play();
     }
 
     /** Creates an empty transparent StackPane used as a page slot. */
@@ -180,13 +241,60 @@ public class OnyxLauncher extends Application {
         AnchorPane.setTopAnchor (popup, b.getMinY() - h - 6);
     }
 
+    // ── shell (permanent wrapper: sidebar + pageArea) ─────────────────────────
+    private BorderPane shell;
+    private StackPane  pageArea;   // swaps between page nodes
+
+    // ── sidebar button refs (needed for setSideActive from any page) ──────────
+    private Button sideHomeBtn;
+    private Button sideProfilesBtn;
+    private Button sideInstallBtn;
+    private Button sideSettingsBtn;
+
+    // ── active sidebar button ref (for highlight toggling) ────────────────────
+    private Button activeSideBtn = null;
+
     // =========================================================================
-    // Main page
+    // Shell  – permanent wrapper holding sidebar + page area
     // =========================================================================
+    private void buildShell(Stage stage) {
+        // ── Sidebar ───────────────────────────────────────────────────────────
+        VBox sidebar = new VBox(4);
+        sidebar.getStyleClass().add("sidebar");
+
+        sideHomeBtn     = sideNavBtn(ICON_HOME,     "Home",             true);
+        sideProfilesBtn = sideNavBtn(ICON_PROFILES, "Profiles",         false);
+        sideInstallBtn  = sideNavBtn(ICON_INSTALL,  "Install Minecraft", false);
+
+        Region sideSpacer = new Region();
+        VBox.setVgrow(sideSpacer, Priority.ALWAYS);
+
+        sideSettingsBtn = sideNavBtn(ICON_SETTINGS, "Settings", false);
+
+        sidebar.getChildren().addAll(sideHomeBtn, sideProfilesBtn, sideInstallBtn, sideSpacer, sideSettingsBtn);
+        activeSideBtn = sideHomeBtn;
+        tintSvgGroup(svgGroupOf(sideHomeBtn), "#1db954");
+
+        // ── Sidebar actions ───────────────────────────────────────────────────
+        sideHomeBtn.setOnAction(e     -> navigateTo(slotMain,        sideHomeBtn));
+        sideProfilesBtn.setOnAction(e -> { buildProfileList(); navigateTo(slotProfileList, sideProfilesBtn); });
+        sideInstallBtn.setOnAction(e  -> navigateTo(slotInstall,     sideInstallBtn));
+        sideSettingsBtn.setOnAction(e -> navigateTo(slotSettings,    sideSettingsBtn));
+
+        // ── Page area ─────────────────────────────────────────────────────────
+        pageArea = new StackPane();
+        pageArea.setStyle("-fx-background-color:#111111;");
+
+        // ── Shell ─────────────────────────────────────────────────────────────
+        shell = new BorderPane();
+        shell.setLeft(sidebar);
+        shell.setCenter(pageArea);
+    }
+
     private void buildMain(Stage stage) {
         BorderPane page = new BorderPane();
 
-        // log area
+        // ── Log area ──────────────────────────────────────────────────────────
         debugArea = new TextArea();
         debugArea.setEditable(false);
         debugArea.getStyleClass().add("log-area");
@@ -204,21 +312,18 @@ public class OnyxLauncher extends Application {
         lt.setCycleCount(Timeline.INDEFINITE); lt.play();
         page.setCenter(debugArea);
 
-        // bottom bar
+        // ── Bottom bar ────────────────────────────────────────────────────────
         usernameBtn = btn("Select Account","btn","btn-account");
         usernameBtn.setMnemonicParsing(false);
         if (!settings.getUsername().isEmpty()) usernameBtn.setText(settings.getUsername());
         profileBtn = btn(activeProfile.getName()+" ▾","btn","btn-profile");
         profileBtn.setStyle("-fx-background-color:"+activeProfile.getColor()+";");
-        Button manageBtn  = btn("⊞ Profiles","btn","btn-dark");
-        Button installBtn = btn("⬇ Install","btn","btn-dark");
-        Button settingsBtn= btn("⚙","btn","btn-icon");
-        Button playBtn    = btn("LAUNCH","btn","btn-launch");
-        hover(usernameBtn); hover(profileBtn); hover(manageBtn); hover(installBtn); hover(settingsBtn); hover(playBtn);
+        Button playBtn = btn("LAUNCH","btn","btn-launch");
+        hover(usernameBtn); hover(profileBtn); hover(playBtn);
 
         Region s1=new Region(); HBox.setHgrow(s1,Priority.ALWAYS);
         Region s2=new Region(); HBox.setHgrow(s2,Priority.ALWAYS);
-        HBox bar = new HBox(10,usernameBtn,s1,profileBtn,s2,manageBtn,installBtn,settingsBtn,playBtn);
+        HBox bar = new HBox(10,usernameBtn,s1,profileBtn,s2,playBtn);
         bar.setAlignment(Pos.CENTER_LEFT);
         Label credit = new Label("OnyxLauncher  •  AmirCoffee  •  mamadjavad_YT");
         credit.getStyleClass().add("label-hint");
@@ -226,15 +331,11 @@ public class OnyxLauncher extends Application {
         bottom.getStyleClass().add("bottom-bar");
         page.setBottom(bottom);
 
-        // popups
+        // ── Popups ────────────────────────────────────────────────────────────
         refreshAccountPopup();
         refreshProfilePopup();
 
-        // actions
-        settingsBtn.setOnAction(e -> showPage(slotSettings));
-        manageBtn.setOnAction(e  -> { buildProfileList(); showPage(slotProfileList); });
-        installBtn.setOnAction(e -> showPage(slotInstall));
-
+        // ── Account / Profile popup actions ───────────────────────────────────
         usernameBtn.setOnAction(e -> {
             boolean open=!accountPopup.isVisible();
             profilePopup.setVisible(false); accountPopup.setVisible(open);
@@ -429,9 +530,7 @@ public class OnyxLauncher extends Application {
         // ── Header ────────────────────────────────────────────────────────────
         Label title = new Label("Settings");
         title.setStyle("-fx-text-fill:white;-fx-font-size:22px;-fx-font-weight:bold;");
-        Button back = btn("← Back", "btn", "btn-back"); hover(back);
-        back.setOnAction(e -> showPage(slotMain));
-        BorderPane hdr = new BorderPane(); hdr.setLeft(title); hdr.setRight(back);
+        BorderPane hdr = new BorderPane(); hdr.setLeft(title);
 
         // ── Default .minecraft path ───────────────────────────────────────────
         Label pathLbl = sLbl("Default .minecraft Path  (blank = auto-detect)");
@@ -570,7 +669,7 @@ public class OnyxLauncher extends Application {
             Toggle selGpu = gpuGroup.getSelectedToggle();
             if (selGpu != null) settings.setGpuMode((String) selGpu.getUserData());
             settings.save();
-            showPage(slotMain);
+            navigateTo(slotMain, sideHomeBtn);
         });
 
         content.getChildren().addAll(
@@ -595,8 +694,7 @@ public class OnyxLauncher extends Application {
         VBox root=new VBox(0); root.setStyle("-fx-background-color:#111111;");
 
         Label title=new Label("Install Minecraft"); title.setStyle("-fx-text-fill:white;-fx-font-size:20px;-fx-font-weight:bold;");
-        Button back=btn("← Back","btn","btn-back"); hover(back); back.setOnAction(e->showPage(slotMain));
-        BorderPane hdr=new BorderPane(); hdr.setLeft(title); hdr.setRight(back);
+        BorderPane hdr=new BorderPane(); hdr.setLeft(title);
         hdr.getStyleClass().add("page-header"); hdr.setPadding(new Insets(18,24,14,24));
 
         installTabPane=new TabPane();
@@ -647,7 +745,7 @@ public class OnyxLauncher extends Application {
                 MinecraftInstaller.installVersion(sel,(msg,pct)->Platform.runLater(()->{st.setText(msg);if(pct>=0)pb.setProgress(pct/100.0);}));
                 Platform.runLater(()->{pb.setProgress(1.0); st.setText("Done: "+sel); installBtn.setDisable(false);
                     activeProfile.setVersion(sel); pm.upsert(activeProfile); refreshProfileBtn();
-                    alert("Installed!",sel+" installed.\nClick LAUNCH to play!"); showPage(slotMain);});
+                    alert("Installed!",sel+" installed.\nClick LAUNCH to play!"); navigateTo(slotMain, sideHomeBtn);});
             }catch(Exception ex){ex.printStackTrace(); Platform.runLater(()->{st.setText("Error: "+ex.getMessage()); pb.setProgress(0); installBtn.setDisable(false);});}}).start();
         });
         return tab;
@@ -695,7 +793,7 @@ public class OnyxLauncher extends Application {
             String fid=(loader!=null&&!loader.isBlank())?FabricInstaller.installFabric(mc,loader,fcb):FabricInstaller.installFabric(mc,fcb);
             Platform.runLater(()->{installBar.setProgress(1.0); installStatus.setText("Done: "+fid); installStartBtn.setDisable(false);
                 activeProfile.setVersion(fid); pm.upsert(activeProfile); refreshProfileBtn();
-                alert("Installed!",fid+" is ready!"); showPage(slotMain);});
+                alert("Installed!",fid+" is ready!"); navigateTo(slotMain, sideHomeBtn);});
         }catch(Exception ex){ex.printStackTrace(); Platform.runLater(()->{installStatus.setText("Error: "+ex.getMessage()); installBar.setProgress(0); installStartBtn.setDisable(false);});}}).start();
     }
 
@@ -707,10 +805,8 @@ public class OnyxLauncher extends Application {
 
         Label title=new Label("Profiles"); title.setStyle("-fx-text-fill:white;-fx-font-size:20px;-fx-font-weight:bold;");
         Button newBtn =btn("+ New Profile","btn","btn-primary"); hover(newBtn);
-        Button backBtn=btn("← Back","btn","btn-back"); hover(backBtn);
         newBtn.setOnAction(e->{ Profile p=Profile.createDefault("New Profile"); pm.upsert(p); buildProfileEdit(p); showPage(slotProfileEdit); });
-        backBtn.setOnAction(e->showPage(slotMain));
-        BorderPane hdr=new BorderPane(); hdr.setLeft(title); hdr.setRight(new HBox(8,newBtn,backBtn));
+        BorderPane hdr=new BorderPane(); hdr.setLeft(title); hdr.setRight(newBtn);
         hdr.getStyleClass().add("page-header"); hdr.setPadding(new Insets(18,24,14,24));
 
         FlowPane cards=new FlowPane(14,14); cards.setPadding(new Insets(20,24,20,24));
@@ -789,12 +885,12 @@ public class OnyxLauncher extends Application {
                 activeProfile=pm.getAll().get(0); settings.setActiveProfileId(activeProfile.getId());
                 settings.save(); refreshProfileBtn();
             }
-            buildProfileList(); showPage(slotProfileList);
+            buildProfileList(); navigateTo(slotProfileList, sideProfilesBtn);
         });
         card.setOnMouseClicked(ev->{
             if(ev.getPickResult().getIntersectedNode()==editBtn||ev.getPickResult().getIntersectedNode()==modsBtn||ev.getPickResult().getIntersectedNode()==delBtn) return;
             activeProfile=p; settings.setActiveProfileId(p.getId()); settings.save();
-            refreshProfileBtn(); refreshProfilePopup(); showPage(slotMain);
+            refreshProfileBtn(); refreshProfilePopup(); navigateTo(slotMain, sideHomeBtn);
         });
         card.getChildren().addAll(nameRow, verRow, dir, new Separator(), actions);
         return card;
@@ -815,7 +911,7 @@ public class OnyxLauncher extends Application {
         Label title = new Label("Edit Profile  –  " + prof.getName());
         title.setStyle("-fx-text-fill:white;-fx-font-size:20px;-fx-font-weight:bold;");
         Button backBtn = btn("← Back", "btn", "btn-back"); hover(backBtn);
-        backBtn.setOnAction(e -> { buildProfileList(); showPage(slotProfileList); });
+        backBtn.setOnAction(e -> { buildProfileList(); navigateTo(slotProfileList, sideProfilesBtn); });
         BorderPane hdr = new BorderPane(); hdr.setLeft(title); hdr.setRight(backBtn);
 
         // ── Name ──────────────────────────────────────────────────────────────
@@ -1001,7 +1097,7 @@ public class OnyxLauncher extends Application {
             prof.setFullscreen(fsBox.isSelected());
             pm.upsert(prof);
             if (prof.getId().equals(activeProfile.getId())) { activeProfile = prof; refreshProfileBtn(); }
-            buildProfileList(); showPage(slotProfileList);
+            buildProfileList(); navigateTo(slotProfileList, sideProfilesBtn);
         });
 
         content.getChildren().addAll(
@@ -1171,6 +1267,120 @@ public class OnyxLauncher extends Application {
     private Button btn(String text, String... css) {
         Button b=new Button(text); b.getStyleClass().addAll(css); return b;
     }
+
+    /** Builds a Lucide-style SVG icon as a JavaFX node, scaled to the given size. */
+    private static javafx.scene.Node svgIcon(String... pathData) {
+        javafx.scene.Group group = new javafx.scene.Group();
+        for (String d : pathData) {
+            javafx.scene.shape.SVGPath p = new javafx.scene.shape.SVGPath();
+            p.setContent(d);
+            p.setStroke(javafx.scene.paint.Color.web("#888888"));
+            p.setFill(javafx.scene.paint.Color.TRANSPARENT);
+            p.setStrokeWidth(1.8);
+            p.setStrokeLineCap(javafx.scene.shape.StrokeLineCap.ROUND);
+            p.setStrokeLineJoin(javafx.scene.shape.StrokeLineJoin.ROUND);
+            group.getChildren().add(p);
+        }
+        // SVG viewBox is 0 0 24 24 — scale to 20px
+        group.setScaleX(20.0 / 24.0);
+        group.setScaleY(20.0 / 24.0);
+        group.setMouseTransparent(true);
+        return group;
+    }
+
+    // Lucide SVG paths (viewBox 0 0 24 24)
+    private static final String[] ICON_HOME = {
+        "M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8",
+        "M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
+    };
+    private static final String[] ICON_PROFILES = {
+        "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2",
+        "M16 3.128a4 4 0 0 1 0 7.744",
+        "M22 21v-2a4 4 0 0 0-3-3.87",
+        "M9 7 m-4 0 a4 4 0 1 0 8 0 a4 4 0 1 0 -8 0"
+    };
+    private static final String[] ICON_INSTALL = {
+        "M12 15V3",
+        "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4",
+        "m7 10 5 5 5-5"
+    };
+    // settings-2: two slider circles with horizontal lines (cleaner than gear)
+    private static final String[] ICON_SETTINGS = {
+        "M14 17H5",
+        "M19 7h-9",
+        "M17 14 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0",
+        "M7 4 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0"
+    };
+
+    /** Creates a sidebar nav button with SVG icon + label side by side. */
+    private Button sideNavBtn(String[] iconPaths, String label, boolean active) {
+        javafx.scene.Node iconNode = svgIcon(iconPaths);
+        StackPane iconBox = new StackPane(iconNode);
+        iconBox.setMinSize(24, 24);
+        iconBox.setMaxSize(24, 24);
+        iconBox.setMouseTransparent(true);
+
+        Label textLbl = new Label(label);
+        textLbl.getStyleClass().add("sidebar-btn-text");
+
+        HBox inner = new HBox(12, iconBox, textLbl);
+        inner.setAlignment(Pos.CENTER_LEFT);
+        inner.setMouseTransparent(true);
+
+        Button b = new Button();
+        b.setGraphic(inner);
+        b.setMaxWidth(Double.MAX_VALUE);
+        b.getStyleClass().add("sidebar-btn");
+        if (active) b.getStyleClass().add("sidebar-btn-active");
+
+        // ── Press / release scale animation ──────────────────────────────────
+        b.setOnMousePressed(e -> {
+            javafx.animation.ScaleTransition press =
+                new javafx.animation.ScaleTransition(Duration.millis(80), b);
+            press.setToX(0.95); press.setToY(0.95);
+            press.setInterpolator(javafx.animation.Interpolator.EASE_OUT);
+            press.play();
+        });
+        b.setOnMouseReleased(e -> {
+            javafx.animation.ScaleTransition release =
+                new javafx.animation.ScaleTransition(Duration.millis(120), b);
+            release.setToX(1.0); release.setToY(1.0);
+            release.setInterpolator(javafx.animation.Interpolator.EASE_OUT);
+            release.play();
+        });
+
+        return b;
+    }
+
+    private static void tintSvgGroup(javafx.scene.Node node, String color) {
+        javafx.scene.paint.Color c = javafx.scene.paint.Color.web(color);
+        if (node instanceof javafx.scene.Group g) {
+            for (javafx.scene.Node child : g.getChildren()) {
+                if (child instanceof javafx.scene.shape.SVGPath sp) sp.setStroke(c);
+            }
+        }
+    }
+
+    /** Extracts the SVG Group node from a sidebar button's graphic. */
+    private static javafx.scene.Node svgGroupOf(Button btn) {
+        if (btn.getGraphic() instanceof HBox hb && !hb.getChildren().isEmpty()
+                && hb.getChildren().get(0) instanceof StackPane sp
+                && !sp.getChildren().isEmpty()) {
+            return sp.getChildren().get(0);
+        }
+        return null;
+    }
+
+    /** Switches the active highlight to the given sidebar button. */
+    private void setSideActive(Button btn) {
+        if (activeSideBtn != null) {
+            activeSideBtn.getStyleClass().remove("sidebar-btn-active");
+            tintSvgGroup(svgGroupOf(activeSideBtn), "#888888");
+        }
+        btn.getStyleClass().add("sidebar-btn-active");
+        tintSvgGroup(svgGroupOf(btn), "#1db954");
+        activeSideBtn = btn;
+    }
     private Button popupItem(String text, String color) {
         Button b=new Button(text); b.setMaxWidth(Double.MAX_VALUE);
         b.setMnemonicParsing(false);
@@ -1186,6 +1396,15 @@ public class OnyxLauncher extends Application {
     private void alert(String title, String msg) {
         Alert a=new Alert(Alert.AlertType.INFORMATION);
         a.setTitle(title); a.setHeaderText(null); a.setContentText(msg); a.showAndWait();
+    }
+
+    /** Loads a font from the JAR classpath and registers it with JavaFX. */
+    private void loadFont(String resourcePath) {
+        try (InputStream is = getClass().getResourceAsStream(resourcePath)) {
+            if (is != null) javafx.scene.text.Font.loadFont(is, 13);
+        } catch (Exception e) {
+            System.err.println("Font load failed: " + resourcePath + " – " + e.getMessage());
+        }
     }
 
 

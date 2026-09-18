@@ -4,7 +4,7 @@
 
 /* ── Root / scene ────────────────────────────────────────── */
 .root {
-    -fx-font-family: "Segoe UI", "Ubuntu", "Helvetica Neue", sans-serif;
+    -fx-font-family: "Ubuntu", "Segoe UI", "Helvetica Neue", sans-serif;
     -fx-font-size: 13px;
     -fx-background-color: #111111;
     -fx-text-fill: #e0e0e0;
@@ -51,6 +51,56 @@
 .scroll-bar .decrement-button {
     -fx-background-color: transparent;
     -fx-padding: 0;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────── */
+.sidebar {
+    -fx-background-color: #0d0d0d;
+    -fx-border-color: #1e1e1e;
+    -fx-border-width: 0 1 0 0;
+    -fx-padding: 16 10 16 10;
+    -fx-pref-width: 210;
+    -fx-min-width: 210;
+    -fx-max-width: 210;
+    -fx-spacing: 6;
+}
+
+.sidebar-btn {
+    -fx-background-color: transparent;
+    -fx-background-radius: 8;
+    -fx-border-width: 0;
+    -fx-cursor: hand;
+    -fx-pref-height: 48;
+    -fx-padding: 0 14;
+    -fx-alignment: center-left;
+}
+.sidebar-btn:hover {
+    -fx-background-color: #181818;
+    -fx-background-radius: 8;
+}
+.sidebar-btn:pressed {
+    -fx-background-color: #101010;
+}
+.sidebar-btn:focused {
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
+}
+
+/* Active state */
+.sidebar-btn-active {
+    -fx-background-color: #0d2117;
+    -fx-background-radius: 8;
+    -fx-border-color: #1db954;
+    -fx-border-width: 0 0 0 3;
+    -fx-border-radius: 0 8 8 0;
+}
+.sidebar-btn-active:hover {
+    -fx-background-color: #0f2a1c;
+}
+
+.sidebar-btn-active .sidebar-btn-text {
+    -fx-text-fill: #1db954;
+    -fx-font-weight: bold;
 }
 
 /* ── Bottom bar (main view) ──────────────────────────────── */
@@ -473,4 +523,18 @@
     -fx-border-color: white;
     -fx-border-radius: 14;
     -fx-border-width: 2;
+}
+
+.sidebar-btn-text {
+    -fx-font-family: "Ubuntu", "Segoe UI", "Helvetica Neue", sans-serif;
+    -fx-text-fill: #888888;
+    -fx-font-size: 14px;
+    -fx-font-weight: normal;
+}
+.sidebar-btn:hover .sidebar-btn-text {
+    -fx-text-fill: #dddddd;
+}
+.sidebar-btn-active .sidebar-btn-text {
+    -fx-text-fill: #1db954;
+    -fx-font-weight: bold;
 }
