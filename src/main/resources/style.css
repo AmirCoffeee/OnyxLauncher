@@ -118,8 +118,8 @@
 /* ── Log / debug area ────────────────────────────────────── */
 .log-area {
     -fx-control-inner-background: #080808;
-    -fx-text-fill: #00e676;
-    -fx-font-family: "Cascadia Code", "Consolas", "Fira Code", monospace;
+    -fx-text-fill: #33ff66;
+    -fx-font-family: "Ubuntu Mono", "Cascadia Code", "Consolas", monospace;
     -fx-font-size: 12px;
     -fx-border-color: transparent;
 }

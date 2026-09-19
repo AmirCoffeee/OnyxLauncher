@@ -55,6 +55,7 @@ public class OnyxLauncher extends Application {
     private final StackPane slotProfileEdit    = slot();
     private final StackPane slotContentManager = slot();
     private final StackPane slotOverlay        = slot();
+    private final StackPane slotLog            = slot();
 
     // ── floating popup layer ──────────────────────────────────────────────────
     private AnchorPane popupLayer;
@@ -114,6 +115,7 @@ public class OnyxLauncher extends Application {
         buildProfileList();
         buildProfileEdit(null);
         buildContentManager(null);
+        buildLog();
         buildOverlay();
 
         // pageArea starts showing main
@@ -241,6 +243,12 @@ public class OnyxLauncher extends Application {
         AnchorPane.setTopAnchor (popup, b.getMinY() - h - 6);
     }
 
+    private void positionBelow(VBox popup, Button btn) {
+        javafx.geometry.Bounds b = btn.localToScene(btn.getBoundsInLocal());
+        AnchorPane.setLeftAnchor(popup, b.getMinX());
+        AnchorPane.setTopAnchor (popup, b.getMaxY() + 6);
+    }
+
     // ── shell (permanent wrapper: sidebar + pageArea) ─────────────────────────
     private BorderPane shell;
     private StackPane  pageArea;   // swaps between page nodes
@@ -250,6 +258,8 @@ public class OnyxLauncher extends Application {
     private Button sideProfilesBtn;
     private Button sideInstallBtn;
     private Button sideSettingsBtn;
+    private Button sideLogBtn;
+    private Button sideAccountBtn;   // account card at bottom of sidebar
 
     // ── active sidebar button ref (for highlight toggling) ────────────────────
     private Button activeSideBtn = null;
@@ -265,13 +275,21 @@ public class OnyxLauncher extends Application {
         sideHomeBtn     = sideNavBtn(ICON_HOME,     "Home",             true);
         sideProfilesBtn = sideNavBtn(ICON_PROFILES, "Profiles",         false);
         sideInstallBtn  = sideNavBtn(ICON_INSTALL,  "Install Minecraft", false);
+        sideLogBtn      = sideNavBtn(ICON_TERMINAL, "Log",              false);
+        sideSettingsBtn = sideNavBtn(ICON_SETTINGS, "Settings",         false);
 
         Region sideSpacer = new Region();
         VBox.setVgrow(sideSpacer, Priority.ALWAYS);
 
-        sideSettingsBtn = sideNavBtn(ICON_SETTINGS, "Settings", false);
+        // ── Account card at very bottom ───────────────────────────────────────
+        sideAccountBtn = buildAccountCard();
 
-        sidebar.getChildren().addAll(sideHomeBtn, sideProfilesBtn, sideInstallBtn, sideSpacer, sideSettingsBtn);
+        sidebar.getChildren().addAll(
+            sideHomeBtn, sideProfilesBtn, sideInstallBtn,
+            sideLogBtn, sideSettingsBtn,
+            sideSpacer,
+            sideAccountBtn
+        );
         activeSideBtn = sideHomeBtn;
         tintSvgGroup(svgGroupOf(sideHomeBtn), "#1db954");
 
@@ -279,7 +297,14 @@ public class OnyxLauncher extends Application {
         sideHomeBtn.setOnAction(e     -> navigateTo(slotMain,        sideHomeBtn));
         sideProfilesBtn.setOnAction(e -> { buildProfileList(); navigateTo(slotProfileList, sideProfilesBtn); });
         sideInstallBtn.setOnAction(e  -> navigateTo(slotInstall,     sideInstallBtn));
+        sideLogBtn.setOnAction(e      -> navigateTo(slotLog,         sideLogBtn));
         sideSettingsBtn.setOnAction(e -> navigateTo(slotSettings,    sideSettingsBtn));
+        sideAccountBtn.setOnAction(e  -> {
+            boolean open = !accountPopup.isVisible();
+            profilePopup.setVisible(false);
+            accountPopup.setVisible(open);
+            if (open) positionAboveSidebar(accountPopup, sideAccountBtn);
+        });
 
         // ── Page area ─────────────────────────────────────────────────────────
         pageArea = new StackPane();
@@ -291,89 +316,283 @@ public class OnyxLauncher extends Application {
         shell.setCenter(pageArea);
     }
 
+    /** Builds the account card button shown at the bottom of the sidebar. */
+    private Button buildAccountCard() {
+        String name = settings.getUsername().isEmpty() ? "No Account" : settings.getUsername();
+
+        // green dot
+        Label dot = new Label("●");
+        dot.setStyle("-fx-text-fill:#1db954;-fx-font-size:8px;");
+
+        Label nameLbl = new Label(name);
+        nameLbl.setStyle(
+            "-fx-text-fill:#dddddd;" +
+            "-fx-font-size:13px;" +
+            "-fx-font-weight:bold;" +
+            "-fx-font-family:'Ubuntu';"
+        );
+        nameLbl.setMaxWidth(130);
+        nameLbl.setEllipsisString("…");
+
+        Label statusLbl = new Label("Online");
+        statusLbl.setStyle(
+            "-fx-text-fill:#1db954;" +
+            "-fx-font-size:10px;" +
+            "-fx-font-family:'Ubuntu';"
+        );
+
+        // small avatar square (green block)
+        Label avatar = new Label(name.isEmpty() ? "?" : String.valueOf(name.charAt(0)).toUpperCase());
+        avatar.setStyle(
+            "-fx-background-color:#1db954;" +
+            "-fx-text-fill:white;" +
+            "-fx-font-size:14px;" +
+            "-fx-font-weight:bold;" +
+            "-fx-font-family:'Ubuntu';" +
+            "-fx-min-width:36;-fx-min-height:36;" +
+            "-fx-max-width:36;-fx-max-height:36;" +
+            "-fx-alignment:center;" +
+            "-fx-background-radius:8;"
+        );
+
+        VBox textBox = new VBox(2, nameLbl, statusLbl);
+        textBox.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(textBox, Priority.ALWAYS);
+
+        HBox inner = new HBox(10, avatar, textBox);
+        inner.setAlignment(Pos.CENTER_LEFT);
+        inner.setMouseTransparent(true);
+
+        Button b = new Button();
+        b.setGraphic(inner);
+        b.setMaxWidth(Double.MAX_VALUE);
+        b.setStyle(
+            "-fx-background-color:#161616;" +
+            "-fx-background-radius:10;" +
+            "-fx-border-color:#222222;" +
+            "-fx-border-radius:10;" +
+            "-fx-border-width:1;" +
+            "-fx-padding:10 12;" +
+            "-fx-cursor:hand;"
+        );
+        b.setOnMouseEntered(ev -> b.setStyle(
+            "-fx-background-color:#1e1e1e;" +
+            "-fx-background-radius:10;" +
+            "-fx-border-color:#2a2a2a;" +
+            "-fx-border-radius:10;" +
+            "-fx-border-width:1;" +
+            "-fx-padding:10 12;" +
+            "-fx-cursor:hand;"
+        ));
+        b.setOnMouseExited(ev -> b.setStyle(
+            "-fx-background-color:#161616;" +
+            "-fx-background-radius:10;" +
+            "-fx-border-color:#222222;" +
+            "-fx-border-radius:10;" +
+            "-fx-border-width:1;" +
+            "-fx-padding:10 12;" +
+            "-fx-cursor:hand;"
+        ));
+        VBox.setMargin(b, new Insets(0, 6, 10, 6));
+        return b;
+    }
+
+    /** Refreshes account card text after username change. */
+    private void refreshAccountCard() {
+        if (sideAccountBtn == null) return;
+        String name = settings.getUsername().isEmpty() ? "No Account" : settings.getUsername();
+        if (sideAccountBtn.getGraphic() instanceof HBox hb) {
+            // avatar
+            if (hb.getChildren().get(0) instanceof Label av) {
+                av.setText(name.isEmpty() ? "?" : String.valueOf(name.charAt(0)).toUpperCase());
+            }
+            // name label
+            if (hb.getChildren().get(1) instanceof VBox vb
+                    && vb.getChildren().get(0) instanceof Label nl) {
+                nl.setText(name);
+            }
+        }
+    }
+
+    /** Positions an account popup above-right of the sidebar account card. */
+    private void positionAboveSidebar(VBox popup, Button btn) {
+        javafx.geometry.Bounds b = btn.localToScene(btn.getBoundsInLocal());
+        double h = popup.getHeight() > 10 ? popup.getHeight() : 200;
+        AnchorPane.setLeftAnchor(popup, b.getMaxX() + 8);
+        AnchorPane.setTopAnchor (popup, b.getMinY() - h + btn.getHeight());
+    }
+
     private void buildMain(Stage stage) {
         BorderPane page = new BorderPane();
+        page.setStyle("-fx-background-color:#0c0c0c;");
 
-        // ── Log area ──────────────────────────────────────────────────────────
-        debugArea = new TextArea();
-        debugArea.setEditable(false);
-        debugArea.getStyleClass().add("log-area");
-        OutputStream lo = new OutputStream() {
-            public void write(int b) { synchronized(logBuf){logBuf.append((char)b);} }
-            public void write(byte[] b,int o,int l){synchronized(logBuf){logBuf.append(new String(b,o,l));}}
-        };
-        System.setOut(new PrintStream(lo,true));
-        System.setErr(new PrintStream(lo,true));
-        Timeline lt = new Timeline(new KeyFrame(Duration.millis(150), ev -> {
-            String c; synchronized(logBuf){if(logBuf.isEmpty())return; c=logBuf.toString(); logBuf.setLength(0);}
-            debugArea.appendText(c);
-            if(debugArea.getLength()>60_000) debugArea.deleteText(0,debugArea.getLength()-30_000);
-        }));
-        lt.setCycleCount(Timeline.INDEFINITE); lt.play();
-        page.setCenter(debugArea);
+        // ── Banner (top) — image background + hero info overlay ───────────────
+        // Background: dark gradient simulating the landscape image
+        Pane bannerBg = new Pane();
+        bannerBg.setPrefHeight(220);
+        bannerBg.setMinHeight(220);
+        bannerBg.setMaxHeight(220);
+        bannerBg.setStyle(
+            "-fx-background-color: linear-gradient(" +
+            "from 0% 0% to 0% 100%," +
+            "#1a1a2e 0%," +
+            "#16213e 30%," +
+            "#0f3460 60%," +
+            "#0a0a0a 100%);"
+        );
 
-        // ── Bottom bar ────────────────────────────────────────────────────────
-        usernameBtn = btn("Select Account","btn","btn-account");
-        usernameBtn.setMnemonicParsing(false);
-        if (!settings.getUsername().isEmpty()) usernameBtn.setText(settings.getUsername());
-        profileBtn = btn(activeProfile.getName()+" ▾","btn","btn-profile");
-        profileBtn.setStyle("-fx-background-color:"+activeProfile.getColor()+";");
-        Button playBtn = btn("LAUNCH","btn","btn-launch");
-        hover(usernameBtn); hover(profileBtn); hover(playBtn);
+        // Hero info overlay — sits at the bottom of the banner
+        // Left: badge + name + version
+        Label profileBadge = new Label("● CURRENT PROFILE");
+        profileBadge.setStyle(
+            "-fx-text-fill:" + activeProfile.getColor() + ";" +
+            "-fx-font-size:10px;-fx-font-weight:bold;" +
+            "-fx-font-family:'Ubuntu';" +
+            "-fx-background-color:" + activeProfile.getColor() + "33;" +
+            "-fx-padding:3 10;-fx-background-radius:4;"
+        );
 
-        Region s1=new Region(); HBox.setHgrow(s1,Priority.ALWAYS);
-        Region s2=new Region(); HBox.setHgrow(s2,Priority.ALWAYS);
-        HBox bar = new HBox(10,usernameBtn,s1,profileBtn,s2,playBtn);
-        bar.setAlignment(Pos.CENTER_LEFT);
-        Label credit = new Label("OnyxLauncher  •  AmirCoffee  •  mamadjavad_YT");
-        credit.getStyleClass().add("label-hint");
-        VBox bottom = new VBox(6,bar,credit);
-        bottom.getStyleClass().add("bottom-bar");
-        page.setBottom(bottom);
+        Label profileNameLbl = new Label(activeProfile.getName());
+        profileNameLbl.setStyle(
+            "-fx-text-fill:#ffffff;" +
+            "-fx-font-size:26px;" +
+            "-fx-font-weight:bold;" +
+            "-fx-font-family:'Ubuntu';" +
+            "-fx-effect:dropshadow(gaussian,rgba(0,0,0,0.8),8,0,0,2);"
+        );
+
+        String rawVer = activeProfile.getVersion();
+        String vType  = rawVer.startsWith("fabric-loader") ? "Fabric"
+                      : rawVer.contains("forge") ? "Forge" : "Vanilla";
+        String vShort = rawVer.startsWith("fabric-loader")
+                      ? rawVer.replaceAll("^fabric-loader-[^-]+-","") : rawVer;
+        Label profileVerLbl = new Label(vType + (vShort.isEmpty() ? "" : "  •  " + vShort));
+        profileVerLbl.setStyle(
+            "-fx-text-fill:#aaaaaa;" +
+            "-fx-font-size:13px;" +
+            "-fx-font-family:'Ubuntu';"
+        );
+
+        VBox leftInfo = new VBox(5, profileBadge, profileNameLbl, profileVerLbl);
+        leftInfo.setAlignment(Pos.CENTER_LEFT);
+
+        // Right side: profile btn + PLAY (account moved to sidebar)
+        profileBtn = btn(activeProfile.getName() + "  ▾","btn","btn-profile");
+        profileBtn.setStyle(
+            "-fx-background-color:" + activeProfile.getColor() + ";" +
+            "-fx-text-fill:white;" +
+            "-fx-font-weight:bold;" +
+            "-fx-font-size:13px;" +
+            "-fx-font-family:'Ubuntu';" +
+            "-fx-background-radius:8;" +
+            "-fx-pref-height:42;" +
+            "-fx-padding:0 16;"
+        );
+
+        Button playBtn = new Button("▶   PLAY");
+        playBtn.setStyle(
+            "-fx-background-color:#1db954;" +
+            "-fx-text-fill:white;" +
+            "-fx-font-weight:bold;" +
+            "-fx-font-size:16px;" +
+            "-fx-font-family:'Ubuntu';" +
+            "-fx-background-radius:10;" +
+            "-fx-pref-height:50;" +
+            "-fx-pref-width:155;" +
+            "-fx-cursor:hand;" +
+            "-fx-effect:dropshadow(gaussian,rgba(29,185,84,0.4),12,0,0,3);"
+        );
+        hover(profileBtn); hover(playBtn);
+
+        Region sp1 = new Region(); HBox.setHgrow(sp1, Priority.ALWAYS);
+        HBox rightControls = new HBox(10, profileBtn, playBtn);
+        rightControls.setAlignment(Pos.CENTER_RIGHT);
+
+        HBox heroRow = new HBox(0, leftInfo, sp1, rightControls);
+        heroRow.setAlignment(Pos.CENTER_LEFT);
+        heroRow.setPadding(new Insets(0, 24, 22, 24));
+
+        // Gradient overlay at bottom of banner so text is readable
+        Pane gradOverlay = new Pane();
+        gradOverlay.setStyle(
+            "-fx-background-color: linear-gradient(" +
+            "from 0% 0% to 0% 100%," +
+            "transparent 0%," +
+            "rgba(0,0,0,0.85) 100%);"
+        );
+
+        StackPane banner = new StackPane(bannerBg, gradOverlay);
+        banner.setPrefHeight(220);
+        banner.setMinHeight(220);
+        banner.setMaxHeight(220);
+
+        // Make gradOverlay fill the whole banner
+        gradOverlay.prefWidthProperty().bind(banner.widthProperty());
+        gradOverlay.prefHeightProperty().bind(banner.heightProperty());
+
+        // Put banner as background, heroRow at bottom via BorderPane
+        BorderPane bannerPane = new BorderPane();
+        bannerPane.setCenter(banner);
+        bannerPane.setBottom(heroRow);
+        bannerPane.setStyle("-fx-background-color:transparent;");
+
+        page.setTop(bannerPane);
+
+        // ── Centre (empty dark area below banner) ─────────────────────────────
+        StackPane centre = new StackPane();
+        centre.setStyle("-fx-background-color:#0c0c0c;");
+        page.setCenter(centre);
 
         // ── Popups ────────────────────────────────────────────────────────────
         refreshAccountPopup();
         refreshProfilePopup();
 
-        // ── Account / Profile popup actions ───────────────────────────────────
-        usernameBtn.setOnAction(e -> {
-            boolean open=!accountPopup.isVisible();
-            profilePopup.setVisible(false); accountPopup.setVisible(open);
-            if(open) positionAbove(accountPopup,usernameBtn);
-        });
         profileBtn.setOnAction(e -> {
-            boolean open=!profilePopup.isVisible();
+            boolean open = !profilePopup.isVisible();
             accountPopup.setVisible(false); profilePopup.setVisible(open);
-            if(open) positionAbove(profilePopup,profileBtn);
+            if (open) positionBelow(profilePopup, profileBtn);
         });
-        page.setOnMouseClicked(e->{accountPopup.setVisible(false);profilePopup.setVisible(false);});
+        page.setOnMouseClicked(e -> { accountPopup.setVisible(false); profilePopup.setVisible(false); });
 
+        // ── Play action ───────────────────────────────────────────────────────
         playBtn.setOnAction(e -> {
-            String user=settings.getUsername();
-            if(user.isEmpty()){alert("No account","Select an account first."); return;}
-            if(activeProfile.getVersion().isEmpty()){alert("No version","Edit the profile and set a Minecraft version."); return;}
+            String user = settings.getUsername();
+            if (user.isEmpty()) { alert("No account", "Select an account first."); return; }
+            if (activeProfile.getVersion().isEmpty()) { alert("No version", "Edit the profile and set a Minecraft version."); return; }
             playBtn.setText("LAUNCHING…"); playBtn.setDisable(true);
-            new Thread(()->{ try {
-                Process proc=GameRunner.launchGame(user,activeProfile);
-                if(proc!=null){
-                    isGameRunning=true;
-                    Platform.runLater(()->hideToTray(stage));
+            new Thread(() -> { try {
+                Process proc = GameRunner.launchGame(user, activeProfile);
+                if (proc != null) {
+                    isGameRunning = true;
+                    Platform.runLater(() -> hideToTray(stage));
                     new BufferedReader(new InputStreamReader(proc.getInputStream()))
-                        .lines().forEach(ln->System.out.println("[MC] "+ln));
-                    proc.waitFor(); isGameRunning=false;
-                    Platform.runLater(()->{restoreFromTray(stage);playBtn.setText("LAUNCH");playBtn.setDisable(false);});
+                        .lines().forEach(ln -> System.out.println("[MC] " + ln));
+                    proc.waitFor(); isGameRunning = false;
+                    Platform.runLater(() -> { restoreFromTray(stage); playBtn.setText("▶   PLAY"); playBtn.setDisable(false); });
                 }
-            }catch(Exception ex){ex.printStackTrace();
-                Platform.runLater(()->{playBtn.setText("LAUNCH");playBtn.setDisable(false);});
+            } catch (Exception ex) { ex.printStackTrace();
+                Platform.runLater(() -> { playBtn.setText("▶   PLAY"); playBtn.setDisable(false); });
             }}).start();
         });
 
         setSlot(slotMain, page);
     }
 
+    /** Refreshes the hero bar profile info after profile change. */
+    private void refreshMainHero() { }
+
     private void refreshProfileBtn() {
-        profileBtn.setText(activeProfile.getName()+" ▾");
-        profileBtn.setStyle("-fx-background-color:"+activeProfile.getColor()+";");
+        profileBtn.setText(activeProfile.getName() + "  ▾");
+        profileBtn.setStyle(
+            "-fx-background-color:" + activeProfile.getColor() + ";" +
+            "-fx-text-fill:white;" +
+            "-fx-font-weight:bold;" +
+            "-fx-font-size:14px;" +
+            "-fx-font-family:'Ubuntu';" +
+            "-fx-background-radius:8;" +
+            "-fx-pref-height:44;" +
+            "-fx-padding:0 18;"
+        );
     }
 
     // =========================================================================
@@ -392,8 +611,7 @@ public class OnyxLauncher extends Application {
             b.setOnAction(e -> {
                 settings.setUsername(u);
                 settings.save();
-                usernameBtn.setMnemonicParsing(false);
-                usernameBtn.setText(u);
+                refreshAccountCard();
                 accountPopup.setVisible(false);
                 refreshAccountPopup();  // re-render so colors update
             });
@@ -428,8 +646,7 @@ public class OnyxLauncher extends Application {
                     String next = settings.getUsernameHistory().isEmpty()
                         ? "" : settings.getUsernameHistory().get(0);
                     settings.setUsername(next);
-                    usernameBtn.setMnemonicParsing(false);
-                    usernameBtn.setText(next.isEmpty() ? "Select Account" : next);
+                    refreshAccountCard();
                 }
                 settings.save();
                 refreshAccountPopup();
@@ -479,6 +696,84 @@ public class OnyxLauncher extends Application {
     }
 
     // =========================================================================
+    // Log page
+    // =========================================================================
+    private void buildLog() {
+        BorderPane page = new BorderPane();
+        page.setStyle("-fx-background-color:#0a0a0a;");
+
+        // ── Header bar ────────────────────────────────────────────────────────
+        // terminal icon in header
+        javafx.scene.Node termIcon = svgIcon(ICON_TERMINAL);
+        tintSvgGroup(termIcon, "#1db954");
+        StackPane termIconBox = new StackPane(termIcon);
+        termIconBox.setMinSize(22, 22); termIconBox.setMaxSize(22, 22);
+
+        Label titleLbl = new Label("Log");
+        titleLbl.setStyle(
+            "-fx-text-fill:#ffffff;" +
+            "-fx-font-size:16px;" +
+            "-fx-font-weight:bold;" +
+            "-fx-font-family:'Ubuntu';"
+        );
+
+        Button clearBtn = btn("Clear", "btn", "btn-dark"); hover(clearBtn);
+        clearBtn.setStyle("-fx-font-size:12px;-fx-padding:4 12;");
+
+        HBox hdr = new HBox(10, termIconBox, titleLbl);
+        hdr.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(hdr, Priority.ALWAYS);
+        BorderPane topBar = new BorderPane();
+        topBar.setLeft(hdr);
+        topBar.setRight(clearBtn);
+        topBar.setStyle(
+            "-fx-background-color:#0f0f0f;" +
+            "-fx-padding:12 16 12 16;" +
+            "-fx-border-color:#1a1a1a;" +
+            "-fx-border-width:0 0 1 0;"
+        );
+        page.setTop(topBar);
+
+        // ── Log TextArea ──────────────────────────────────────────────────────
+        debugArea = new TextArea();
+        debugArea.setEditable(false);
+        debugArea.getStyleClass().add("log-area");
+        debugArea.setStyle(
+            "-fx-control-inner-background:#080808;" +
+            "-fx-text-fill:#33ff66;" +
+            "-fx-font-family:'Ubuntu Mono','Cascadia Code','Consolas','Courier New',monospace;" +
+            "-fx-font-size:12px;" +
+            "-fx-border-color:transparent;" +
+            "-fx-background-color:#080808;"
+        );
+
+        // ── Redirect stdout/stderr ────────────────────────────────────────────
+        OutputStream lo = new OutputStream() {
+            public void write(int b) { synchronized(logBuf){logBuf.append((char)b);} }
+            public void write(byte[] b,int o,int l){synchronized(logBuf){logBuf.append(new String(b,o,l));}}
+        };
+        System.setOut(new PrintStream(lo,true));
+        System.setErr(new PrintStream(lo,true));
+
+        Timeline lt = new Timeline(new KeyFrame(Duration.millis(150), ev -> {
+            String c; synchronized(logBuf){if(logBuf.isEmpty())return; c=logBuf.toString(); logBuf.setLength(0);}
+            debugArea.appendText(c);
+            if(debugArea.getLength()>60_000) debugArea.deleteText(0,debugArea.getLength()-30_000);
+        }));
+        lt.setCycleCount(Timeline.INDEFINITE); lt.play();
+
+        clearBtn.setOnAction(e -> debugArea.clear());
+
+        ScrollPane scroll = new ScrollPane(debugArea);
+        scroll.setFitToWidth(true);
+        scroll.setFitToHeight(true);
+        scroll.setStyle("-fx-background-color:#080808;-fx-border-color:transparent;");
+        page.setCenter(scroll);
+
+        setSlot(slotLog, page);
+    }
+
+    // =========================================================================
     // Overlay – add account dialog
     // =========================================================================
     private void buildOverlay() {
@@ -507,7 +802,7 @@ public class OnyxLauncher extends Application {
             String name=field.getText().trim();
             if(!name.isEmpty()){
                 settings.setUsername(name); settings.addUsernameToHistory(name); settings.save();
-                usernameBtn.setMnemonicParsing(false); usernameBtn.setText(name); refreshAccountPopup();
+                refreshAccountCard(); refreshAccountPopup();
                 slotOverlay.setVisible(false);
             }
         });
@@ -1310,6 +1605,11 @@ public class OnyxLauncher extends Application {
         "M19 7h-9",
         "M17 14 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0",
         "M7 4 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0"
+    };
+    // terminal icon: window frame + prompt
+    private static final String[] ICON_TERMINAL = {
+        "M4 17l6-6-6-6",
+        "M12 19h8"
     };
 
     /** Creates a sidebar nav button with SVG icon + label side by side. */
