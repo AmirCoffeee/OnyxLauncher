@@ -26,47 +26,33 @@ import java.io.*;
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * OnyxLauncher – main UI class.
- *
- * Navigation model
- * ─────────────────
- * rootStack contains FIXED slot containers (StackPane wrappers).
- * Rebuilding a page calls slot.getChildren().setAll(newContent) so the
- * container reference in rootStack never changes – only its contents do.
- * showPage(slot) just toggles visibility on those containers.
- */
 public class OnyxLauncher extends Application {
 
-    // ── state ─────────────────────────────────────────────────────────────────
     private Settings       settings;
     private ProfileManager pm;
     private Profile        activeProfile;
 
-    // ── root ──────────────────────────────────────────────────────────────────
     private StackPane  rootStack;
 
-    // ── fixed page SLOTS (never replaced, only their children change) ─────────
     private final StackPane slotMain           = slot();
     private final StackPane slotSettings       = slot();
     private final StackPane slotInstall        = slot();
     private final StackPane slotProfileList    = slot();
     private final StackPane slotProfileEdit    = slot();
-    private final StackPane slotContentManager = slot();
+    private final StackPane slotContentManager  = slot();
+    private final StackPane slotContentBrowser  = slot();
     private final StackPane slotOverlay        = slot();
     private final StackPane slotLog            = slot();
 
-    // ── floating popup layer ──────────────────────────────────────────────────
     private AnchorPane popupLayer;
     private VBox       accountPopup;
     private VBox       profilePopup;
 
-    // ── live bottom-bar refs (updated when active profile changes) ────────────
     private Button profileBtn;
     private Button usernameBtn;
 
-    // ── install page widgets (fields so background threads reach them) ────────
     private TabPane          installTabPane;
     private ComboBox<String> installMcCombo;
     private ComboBox<String> installLoaderCombo;
@@ -74,16 +60,14 @@ public class OnyxLauncher extends Application {
     private Label            installStatus;
     private Button           installStartBtn;
 
-    // ── log ───────────────────────────────────────────────────────────────────
     private TextArea           debugArea;
     private final StringBuilder logBuf = new StringBuilder();
 
     private TrayIcon trayIcon;
     private boolean  isGameRunning = false;
 
-    // =========================================================================
-    // start
-    // =========================================================================
+
+
     @Override
     public void start(Stage stage) {
         settings      = Settings.load();
@@ -94,21 +78,17 @@ public class OnyxLauncher extends Application {
         catch (Exception ignored) {}
         Platform.setImplicitExit(false);
 
-        // ── Load embedded fonts (works offline, font is inside the JAR) ───────
         loadFont("/fonts/Ubuntu-Regular.ttf");
         loadFont("/fonts/Ubuntu-Medium.ttf");
         loadFont("/fonts/Ubuntu-Bold.ttf");
 
-        // build popup layer
         accountPopup = popupCard();
         profilePopup = popupCard();
         popupLayer   = new AnchorPane(accountPopup, profilePopup);
         popupLayer.setPickOnBounds(false);
 
-        // build shell (sidebar + page area) first
         buildShell(stage);
 
-        // build all page contents into their nodes
         buildMain(stage);
         buildSettings(stage);
         buildInstall();
@@ -118,10 +98,8 @@ public class OnyxLauncher extends Application {
         buildLog();
         buildOverlay();
 
-        // pageArea starts showing main
         navigateTo(slotMain, sideHomeBtn);
 
-        // assemble root: shell fills everything, overlay floats on top
         rootStack = new StackPane(shell, slotOverlay, popupLayer);
         rootStack.setStyle("-fx-background-color:#111111;");
 
@@ -139,11 +117,9 @@ public class OnyxLauncher extends Application {
         stage.show();
     }
 
-    // =========================================================================
-    // Navigation
-    // =========================================================================
 
-    /** Switches the visible page inside pageArea and updates sidebar highlight. */
+
+    
     private void navigateTo(StackPane slot, Button sideBtn) {
         accountPopup.setVisible(false);
         profilePopup.setVisible(false);
@@ -151,24 +127,15 @@ public class OnyxLauncher extends Application {
         animatePageTransition(slot);
     }
 
-    /**
-     * Legacy helper — navigates without changing sidebar highlight.
-     * Used for sub-pages (ProfileEdit, ContentManager) that are not
-     * directly reachable from the sidebar.
-     */
     private void showPage(StackPane slot) {
         accountPopup.setVisible(false);
         profilePopup.setVisible(false);
         animatePageTransition(slot);
     }
 
-    /**
-     * Fade-out current page → swap → fade-in + slide-up new page.
-     * Total duration: ~220 ms — fast enough to feel snappy, slow enough to feel smooth.
-     */
     private void animatePageTransition(StackPane next) {
         if (pageArea.getChildren().isEmpty()) {
-            // first load — just show
+
             next.setVisible(true);
             pageArea.getChildren().setAll(next);
             return;
@@ -176,23 +143,20 @@ public class OnyxLauncher extends Application {
 
         Node current = pageArea.getChildren().get(0);
 
-        // If already showing the same page, do nothing
         if (current == next) return;
 
-        // ── Fade-out current ──────────────────────────────────────────────────
         javafx.animation.FadeTransition fadeOut =
             new javafx.animation.FadeTransition(Duration.millis(90), current);
         fadeOut.setFromValue(1.0);
         fadeOut.setToValue(0.0);
 
         fadeOut.setOnFinished(e -> {
-            // ── Swap ──────────────────────────────────────────────────────────
+
             next.setVisible(true);
             next.setOpacity(0);
             next.setTranslateY(10);
             pageArea.getChildren().setAll(next);
 
-            // ── Fade-in + slide-up new page ───────────────────────────────────
             javafx.animation.FadeTransition fadeIn =
                 new javafx.animation.FadeTransition(Duration.millis(160), next);
             fadeIn.setFromValue(0.0);
@@ -212,21 +176,18 @@ public class OnyxLauncher extends Application {
         fadeOut.play();
     }
 
-    /** Creates an empty transparent StackPane used as a page slot. */
     private static StackPane slot() {
         StackPane sp = new StackPane();
         sp.setVisible(false);
         return sp;
     }
 
-    /** Replaces the content of a slot (keeps the slot node itself stable). */
     private static void setSlot(StackPane slot, Node content) {
         slot.getChildren().setAll(content);
     }
 
-    // =========================================================================
-    // Hover animation
-    // =========================================================================
+
+
     private void hover(Node n) {
         ScaleTransition i = new ScaleTransition(Duration.millis(100), n);
         i.setToX(1.04); i.setToY(1.04);
@@ -249,43 +210,40 @@ public class OnyxLauncher extends Application {
         AnchorPane.setTopAnchor (popup, b.getMaxY() + 6);
     }
 
-    // ── shell (permanent wrapper: sidebar + pageArea) ─────────────────────────
     private BorderPane shell;
-    private StackPane  pageArea;   // swaps between page nodes
+    private StackPane  pageArea;
 
-    // ── sidebar button refs (needed for setSideActive from any page) ──────────
     private Button sideHomeBtn;
     private Button sideProfilesBtn;
     private Button sideInstallBtn;
     private Button sideSettingsBtn;
     private Button sideLogBtn;
-    private Button sideAccountBtn;   // account card at bottom of sidebar
+    private Button sideAccountBtn;
 
-    // ── active sidebar button ref (for highlight toggling) ────────────────────
     private Button activeSideBtn = null;
+    private Button sideContentBtn;
 
-    // =========================================================================
-    // Shell  – permanent wrapper holding sidebar + page area
-    // =========================================================================
+
+
     private void buildShell(Stage stage) {
-        // ── Sidebar ───────────────────────────────────────────────────────────
+
         VBox sidebar = new VBox(4);
         sidebar.getStyleClass().add("sidebar");
 
         sideHomeBtn     = sideNavBtn(ICON_HOME,     "Home",             true);
         sideProfilesBtn = sideNavBtn(ICON_PROFILES, "Profiles",         false);
         sideInstallBtn  = sideNavBtn(ICON_INSTALL,  "Install Minecraft", false);
+        sideContentBtn  = sideNavBtn(ICON_CONTENT,  "Get Content",       false);
         sideLogBtn      = sideNavBtn(ICON_TERMINAL, "Log",              false);
         sideSettingsBtn = sideNavBtn(ICON_SETTINGS, "Settings",         false);
 
         Region sideSpacer = new Region();
         VBox.setVgrow(sideSpacer, Priority.ALWAYS);
 
-        // ── Account card at very bottom ───────────────────────────────────────
         sideAccountBtn = buildAccountCard();
 
         sidebar.getChildren().addAll(
-            sideHomeBtn, sideProfilesBtn, sideInstallBtn,
+            sideHomeBtn, sideProfilesBtn, sideInstallBtn, sideContentBtn,
             sideLogBtn, sideSettingsBtn,
             sideSpacer,
             sideAccountBtn
@@ -293,12 +251,12 @@ public class OnyxLauncher extends Application {
         activeSideBtn = sideHomeBtn;
         tintSvgGroup(svgGroupOf(sideHomeBtn), "#1db954");
 
-        // ── Sidebar actions ───────────────────────────────────────────────────
-        sideHomeBtn.setOnAction(e     -> navigateTo(slotMain,        sideHomeBtn));
+        sideHomeBtn.setOnAction(e     -> navigateTo(slotMain,          sideHomeBtn));
         sideProfilesBtn.setOnAction(e -> { buildProfileList(); navigateTo(slotProfileList, sideProfilesBtn); });
-        sideInstallBtn.setOnAction(e  -> navigateTo(slotInstall,     sideInstallBtn));
-        sideLogBtn.setOnAction(e      -> navigateTo(slotLog,         sideLogBtn));
-        sideSettingsBtn.setOnAction(e -> navigateTo(slotSettings,    sideSettingsBtn));
+        sideInstallBtn.setOnAction(e  -> navigateTo(slotInstall,       sideInstallBtn));
+        sideContentBtn.setOnAction(e  -> { buildContentBrowser(); navigateTo(slotContentBrowser, sideContentBtn); });
+        sideLogBtn.setOnAction(e      -> navigateTo(slotLog,           sideLogBtn));
+        sideSettingsBtn.setOnAction(e -> navigateTo(slotSettings,      sideSettingsBtn));
         sideAccountBtn.setOnAction(e  -> {
             boolean open = !accountPopup.isVisible();
             profilePopup.setVisible(false);
@@ -306,21 +264,17 @@ public class OnyxLauncher extends Application {
             if (open) positionAboveSidebar(accountPopup, sideAccountBtn);
         });
 
-        // ── Page area ─────────────────────────────────────────────────────────
         pageArea = new StackPane();
         pageArea.setStyle("-fx-background-color:#111111;");
 
-        // ── Shell ─────────────────────────────────────────────────────────────
         shell = new BorderPane();
         shell.setLeft(sidebar);
         shell.setCenter(pageArea);
     }
 
-    /** Builds the account card button shown at the bottom of the sidebar. */
     private Button buildAccountCard() {
         String name = settings.getUsername().isEmpty() ? "No Account" : settings.getUsername();
 
-        // green dot
         Label dot = new Label("●");
         dot.setStyle("-fx-text-fill:#1db954;-fx-font-size:8px;");
 
@@ -341,7 +295,6 @@ public class OnyxLauncher extends Application {
             "-fx-font-family:'Ubuntu';"
         );
 
-        // small avatar square (green block)
         Label avatar = new Label(name.isEmpty() ? "?" : String.valueOf(name.charAt(0)).toUpperCase());
         avatar.setStyle(
             "-fx-background-color:#1db954;" +
@@ -397,16 +350,15 @@ public class OnyxLauncher extends Application {
         return b;
     }
 
-    /** Refreshes account card text after username change. */
     private void refreshAccountCard() {
         if (sideAccountBtn == null) return;
         String name = settings.getUsername().isEmpty() ? "No Account" : settings.getUsername();
         if (sideAccountBtn.getGraphic() instanceof HBox hb) {
-            // avatar
+
             if (hb.getChildren().get(0) instanceof Label av) {
                 av.setText(name.isEmpty() ? "?" : String.valueOf(name.charAt(0)).toUpperCase());
             }
-            // name label
+
             if (hb.getChildren().get(1) instanceof VBox vb
                     && vb.getChildren().get(0) instanceof Label nl) {
                 nl.setText(name);
@@ -414,7 +366,6 @@ public class OnyxLauncher extends Application {
         }
     }
 
-    /** Positions an account popup above-right of the sidebar account card. */
     private void positionAboveSidebar(VBox popup, Button btn) {
         javafx.geometry.Bounds b = btn.localToScene(btn.getBoundsInLocal());
         double h = popup.getHeight() > 10 ? popup.getHeight() : 200;
@@ -426,8 +377,7 @@ public class OnyxLauncher extends Application {
         BorderPane page = new BorderPane();
         page.setStyle("-fx-background-color:#0c0c0c;");
 
-        // ── Banner (top) — image background + hero info overlay ───────────────
-        // Background: dark gradient simulating the landscape image
+
         Pane bannerBg = new Pane();
         bannerBg.setPrefHeight(220);
         bannerBg.setMinHeight(220);
@@ -441,8 +391,7 @@ public class OnyxLauncher extends Application {
             "#0a0a0a 100%);"
         );
 
-        // Hero info overlay — sits at the bottom of the banner
-        // Left: badge + name + version
+
         Label profileBadge = new Label("● CURRENT PROFILE");
         profileBadge.setStyle(
             "-fx-text-fill:" + activeProfile.getColor() + ";" +
@@ -476,7 +425,6 @@ public class OnyxLauncher extends Application {
         VBox leftInfo = new VBox(5, profileBadge, profileNameLbl, profileVerLbl);
         leftInfo.setAlignment(Pos.CENTER_LEFT);
 
-        // Right side: profile btn + PLAY (account moved to sidebar)
         profileBtn = btn(activeProfile.getName() + "  ▾","btn","btn-profile");
         profileBtn.setStyle(
             "-fx-background-color:" + activeProfile.getColor() + ";" +
@@ -512,7 +460,6 @@ public class OnyxLauncher extends Application {
         heroRow.setAlignment(Pos.CENTER_LEFT);
         heroRow.setPadding(new Insets(0, 24, 22, 24));
 
-        // Gradient overlay at bottom of banner so text is readable
         Pane gradOverlay = new Pane();
         gradOverlay.setStyle(
             "-fx-background-color: linear-gradient(" +
@@ -526,11 +473,9 @@ public class OnyxLauncher extends Application {
         banner.setMinHeight(220);
         banner.setMaxHeight(220);
 
-        // Make gradOverlay fill the whole banner
         gradOverlay.prefWidthProperty().bind(banner.widthProperty());
         gradOverlay.prefHeightProperty().bind(banner.heightProperty());
 
-        // Put banner as background, heroRow at bottom via BorderPane
         BorderPane bannerPane = new BorderPane();
         bannerPane.setCenter(banner);
         bannerPane.setBottom(heroRow);
@@ -538,12 +483,10 @@ public class OnyxLauncher extends Application {
 
         page.setTop(bannerPane);
 
-        // ── Centre (empty dark area below banner) ─────────────────────────────
         StackPane centre = new StackPane();
         centre.setStyle("-fx-background-color:#0c0c0c;");
         page.setCenter(centre);
 
-        // ── Popups ────────────────────────────────────────────────────────────
         refreshAccountPopup();
         refreshProfilePopup();
 
@@ -554,7 +497,6 @@ public class OnyxLauncher extends Application {
         });
         page.setOnMouseClicked(e -> { accountPopup.setVisible(false); profilePopup.setVisible(false); });
 
-        // ── Play action ───────────────────────────────────────────────────────
         playBtn.setOnAction(e -> {
             String user = settings.getUsername();
             if (user.isEmpty()) { alert("No account", "Select an account first."); return; }
@@ -578,7 +520,6 @@ public class OnyxLauncher extends Application {
         setSlot(slotMain, page);
     }
 
-    /** Refreshes the hero bar profile info after profile change. */
     private void refreshMainHero() { }
 
     private void refreshProfileBtn() {
@@ -595,9 +536,8 @@ public class OnyxLauncher extends Application {
         );
     }
 
-    // =========================================================================
-    // Account popup
-    // =========================================================================
+
+
     private void refreshAccountPopup() {
         accountPopup.getChildren().clear();
         Label h = new Label("Accounts"); h.getStyleClass().add("popup-header");
@@ -606,17 +546,15 @@ public class OnyxLauncher extends Application {
         for (String u : settings.getUsernameHistory()) {
             boolean active = u.equals(settings.getUsername());
 
-            // Name button — white when not active, green when active
             Button b = popupItem(u, active ? "#1db954" : "#ffffff");
             b.setOnAction(e -> {
                 settings.setUsername(u);
                 settings.save();
                 refreshAccountCard();
                 accountPopup.setVisible(false);
-                refreshAccountPopup();  // re-render so colors update
+                refreshAccountPopup();
             });
 
-            // Delete button — small ✕ on the right
             Button del = new Button("✕");
             del.setStyle(
                 "-fx-background-color:transparent;" +
@@ -641,7 +579,7 @@ public class OnyxLauncher extends Application {
             ));
             del.setOnAction(e -> {
                 settings.getUsernameHistory().remove(u);
-                // If we deleted the active account, clear it or pick next
+
                 if (active) {
                     String next = settings.getUsernameHistory().isEmpty()
                         ? "" : settings.getUsernameHistory().get(0);
@@ -667,9 +605,8 @@ public class OnyxLauncher extends Application {
         accountPopup.getChildren().add(add);
     }
 
-    // =========================================================================
-    // Profile quick-switcher popup
-    // =========================================================================
+
+
     private void refreshProfilePopup() {
         profilePopup.getChildren().clear();
         Label h=new Label("Profiles"); h.getStyleClass().add("popup-header");
@@ -695,15 +632,13 @@ public class OnyxLauncher extends Application {
         profilePopup.getChildren().add(addNew);
     }
 
-    // =========================================================================
-    // Log page
-    // =========================================================================
+
+
     private void buildLog() {
         BorderPane page = new BorderPane();
         page.setStyle("-fx-background-color:#0a0a0a;");
 
-        // ── Header bar ────────────────────────────────────────────────────────
-        // terminal icon in header
+
         javafx.scene.Node termIcon = svgIcon(ICON_TERMINAL);
         tintSvgGroup(termIcon, "#1db954");
         StackPane termIconBox = new StackPane(termIcon);
@@ -734,7 +669,6 @@ public class OnyxLauncher extends Application {
         );
         page.setTop(topBar);
 
-        // ── Log TextArea ──────────────────────────────────────────────────────
         debugArea = new TextArea();
         debugArea.setEditable(false);
         debugArea.getStyleClass().add("log-area");
@@ -747,7 +681,6 @@ public class OnyxLauncher extends Application {
             "-fx-background-color:#080808;"
         );
 
-        // ── Redirect stdout/stderr ────────────────────────────────────────────
         OutputStream lo = new OutputStream() {
             public void write(int b) { synchronized(logBuf){logBuf.append((char)b);} }
             public void write(byte[] b,int o,int l){synchronized(logBuf){logBuf.append(new String(b,o,l));}}
@@ -773,9 +706,8 @@ public class OnyxLauncher extends Application {
         setSlot(slotLog, page);
     }
 
-    // =========================================================================
-    // Overlay – add account dialog
-    // =========================================================================
+
+
     private void buildOverlay() {
         VBox backdrop = new VBox();
         backdrop.getStyleClass().add("overlay-backdrop");
@@ -814,20 +746,17 @@ public class OnyxLauncher extends Application {
         slotOverlay.setVisible(true);
     }
 
-    // =========================================================================
-    // Settings page
-    // =========================================================================
+
+
     private void buildSettings(Stage stage) {
         VBox content = new VBox(24);
         content.setPadding(new Insets(28, 36, 36, 36));
         content.setStyle("-fx-background-color:#111111;");
 
-        // ── Header ────────────────────────────────────────────────────────────
         Label title = new Label("Settings");
         title.setStyle("-fx-text-fill:white;-fx-font-size:22px;-fx-font-weight:bold;");
         BorderPane hdr = new BorderPane(); hdr.setLeft(title);
 
-        // ── Default .minecraft path ───────────────────────────────────────────
         Label pathLbl = sLbl("Default .minecraft Path  (blank = auto-detect)");
         TextField pathF = field(settings.getCustomMcPath(), "Leave blank for default");
         Button browse = btn("Browse…", "btn", "btn-dark"); hover(browse);
@@ -839,7 +768,6 @@ public class OnyxLauncher extends Application {
         HBox pathRow = new HBox(8, pathF, browse);
         HBox.setHgrow(pathF, Priority.ALWAYS);
 
-        // ── GPU Selector ──────────────────────────────────────────────────────
         Label gpuTitle = new Label("Graphics Card");
         gpuTitle.setStyle("-fx-text-fill:white;-fx-font-size:16px;-fx-font-weight:bold;");
         Label gpuSubtitle = new Label("Select which GPU every Minecraft launch will use");
@@ -849,7 +777,7 @@ public class OnyxLauncher extends Application {
         List<String> rawGpus    = GameRunner.detectGpus();
         String       savedGpu   = settings.getGpuMode();
         ToggleGroup  gpuGroup   = new ToggleGroup();
-        // Prevent deselecting all — exactly one must always be selected
+
         gpuGroup.selectedToggleProperty().addListener((obs, oldT, newT) -> {
             if (newT == null) gpuGroup.selectToggle(oldT);
         });
@@ -862,7 +790,7 @@ public class OnyxLauncher extends Application {
             String[] parts     = entry.split("\\|", 2);
             String   typeKey   = parts[0];
             String   rawName   = parts.length > 1 ? parts[1] : typeKey;
-            // Strip noisy vendor prefixes
+
             rawName = rawName
                 .replaceAll("(?i)^Intel Corporation\\s+", "")
                 .replaceAll("(?i)^NVIDIA Corporation\\s+", "")
@@ -880,7 +808,6 @@ public class OnyxLauncher extends Application {
             tb.setCursor(javafx.scene.Cursor.HAND);
             tb.setFocusTraversable(true);
 
-            // Card content
             Label nameLbl = new Label(gpuName);
             nameLbl.setStyle("-fx-text-fill:#efefef;-fx-font-size:13px;-fx-font-weight:bold;");
             nameLbl.setWrapText(true);
@@ -901,7 +828,6 @@ public class OnyxLauncher extends Application {
             tb.setMinWidth(220);
             tb.setPrefHeight(68);
 
-            // Pre-select: "auto"/empty → first dgpu; if none exists → first igpu
             boolean hasDgpu = rawGpus.stream().anyMatch(g -> g.startsWith("dgpu|"));
             boolean sel;
             if (savedGpu.equals("auto") || savedGpu.isEmpty()) {
@@ -926,7 +852,7 @@ public class OnyxLauncher extends Application {
             if (sel) tb.setSelected(true);
 
             final String ac = accentCol;
-            // Refresh all card styles when selection changes
+
             tb.selectedProperty().addListener((obs, was, now) -> {
                 for (ToggleButton b : gpuBtns) {
                     boolean s  = b.isSelected();
@@ -944,7 +870,6 @@ public class OnyxLauncher extends Application {
             gpuCards.getChildren().add(tb);
         }
 
-        // Apply initial styles
         for (ToggleButton b : gpuBtns) {
             boolean s  = b.isSelected();
             String  ba = s ? (((String) b.getUserData()).startsWith("dgpu") ? "#1db954" : "#2196F3") : "#2a2a2a";
@@ -956,14 +881,22 @@ public class OnyxLauncher extends Application {
             );
         }
 
-        // ── Save ──────────────────────────────────────────────────────────────
+        Label advTitle = new Label("Install Options");
+        advTitle.setStyle("-fx-text-fill:white;-fx-font-size:16px;-fx-font-weight:bold;");
+        Label advSub = new Label("Show legacy versions in the Install tab");
+        advSub.setStyle("-fx-text-fill:#888;-fx-font-size:12px;");
+        CheckBox advCheck = new CheckBox("Show Snapshot, Old Beta & Old Alpha versions");
+        advCheck.setSelected(settings.isShowAdvancedVersions());
+
         Button save = btn("Save & Back", "btn", "btn-primary");
         save.setPrefHeight(44); save.setPrefWidth(160); hover(save);
         save.setOnAction(e -> {
             settings.setCustomMcPath(pathF.getText().trim());
             Toggle selGpu = gpuGroup.getSelectedToggle();
             if (selGpu != null) settings.setGpuMode((String) selGpu.getUserData());
+            settings.setShowAdvancedVersions(advCheck.isSelected());
             settings.save();
+            buildInstall();
             navigateTo(slotMain, sideHomeBtn);
         });
 
@@ -974,6 +907,8 @@ public class OnyxLauncher extends Application {
             new Separator(),
             gpuHeader, gpuCards,
             new Separator(),
+            advTitle, advSub, advCheck,
+            new Separator(),
             save
         );
         ScrollPane sp = new ScrollPane(content);
@@ -982,9 +917,8 @@ public class OnyxLauncher extends Application {
         setSlot(slotSettings, sp);
     }
 
-    // =========================================================================
-    // Install page
-    // =========================================================================
+
+
     private void buildInstall() {
         VBox root=new VBox(0); root.setStyle("-fx-background-color:#111111;");
 
@@ -994,11 +928,20 @@ public class OnyxLauncher extends Application {
 
         installTabPane=new TabPane();
         installTabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+
         installTabPane.getTabs().addAll(
-            versionTab("Release","release"), versionTab("Snapshot","snapshot"),
-            versionTab("Old Beta","old_beta"), versionTab("Old Alpha","old_alpha"),
-            fabricTab()
+            versionTab("Release","release"),
+            fabricTab(),
+            forgeTab()
         );
+        if (settings.isShowAdvancedVersions()) {
+            installTabPane.getTabs().addAll(
+                versionTab("Snapshot","snapshot"),
+                versionTab("Old Beta","old_beta"),
+                versionTab("Old Alpha","old_alpha")
+            );
+        }
+
         VBox.setVgrow(installTabPane,Priority.ALWAYS);
         root.getChildren().addAll(hdr,installTabPane);
         setSlot(slotInstall, root);
@@ -1076,6 +1019,135 @@ public class OnyxLauncher extends Application {
         return tab;
     }
 
+    private Tab forgeTab() {
+        Tab tab = new Tab("Forge");
+        VBox box = new VBox(14);
+        box.setPadding(new Insets(18, 24, 18, 24));
+        box.setStyle("-fx-background-color:#111111;");
+
+        ComboBox<String> mcCombo = new ComboBox<>();
+        mcCombo.setPrefWidth(280);
+        mcCombo.setPromptText("Minecraft Version…");
+        mcCombo.setVisibleRowCount(8);
+        limitComboHeight(mcCombo, 8);
+
+        ComboBox<String> forgeCombo = new ComboBox<>();
+        forgeCombo.setPrefWidth(280);
+        forgeCombo.setPromptText("Forge Version…");
+        forgeCombo.setVisibleRowCount(8);
+        limitComboHeight(forgeCombo, 8);
+        forgeCombo.setDisable(true);
+
+        ProgressBar bar = new ProgressBar(0);
+        bar.setPrefWidth(Double.MAX_VALUE);
+        bar.setVisible(false);
+        bar.getStyleClass().add("progress-bar");
+
+        Label status = new Label();
+        status.getStyleClass().add("label-hint");
+        status.setVisible(false);
+
+        Button installBtn = btn("Install Forge", "btn", "btn-primary");
+        installBtn.setMaxWidth(Double.MAX_VALUE);
+        installBtn.setPrefHeight(44);
+        installBtn.setDisable(true);
+        hover(installBtn);
+
+        box.getChildren().addAll(
+            sLbl("Minecraft Version"), mcCombo,
+            sLbl("Forge Version"), forgeCombo,
+            bar, status, installBtn
+        );
+        tab.setContent(box);
+
+        tab.selectedProperty().addListener((ob, o, n) -> {
+            if (n && mcCombo.getItems().isEmpty()) {
+                new Thread(() -> {
+                    try {
+                        List<String> vers = ForgeInstaller.fetchSupportedMcVersions();
+                        Platform.runLater(() -> {
+                            mcCombo.setItems(FXCollections.observableArrayList(vers));
+                            if (!vers.isEmpty()) mcCombo.getSelectionModel().selectFirst();
+                        });
+                    } catch (Exception ex) {
+                        Platform.runLater(() -> status.setText("Failed to load versions: " + ex.getMessage()));
+                    }
+                }).start();
+            }
+        });
+
+        mcCombo.setOnAction(e -> {
+            String mc = mcCombo.getValue();
+            if (mc == null) return;
+            forgeCombo.getItems().clear();
+            forgeCombo.setDisable(true);
+            installBtn.setDisable(true);
+            status.setText("Loading Forge versions…");
+            status.setVisible(true);
+            new Thread(() -> {
+                try {
+                    List<String> fvers = ForgeInstaller.fetchForgeVersions(mc);
+                    Platform.runLater(() -> {
+                        forgeCombo.setItems(FXCollections.observableArrayList(fvers));
+                        if (!fvers.isEmpty()) forgeCombo.getSelectionModel().selectFirst();
+                        forgeCombo.setDisable(false);
+                        installBtn.setDisable(false);
+                        status.setVisible(false);
+                    });
+                } catch (Exception ex) {
+                    Platform.runLater(() -> status.setText("Error: " + ex.getMessage()));
+                }
+            }).start();
+        });
+
+        installBtn.setOnAction(e -> {
+            String mc    = mcCombo.getValue();
+            String forge = forgeCombo.getValue();
+            if (mc == null || mc.isBlank()) { alert("", "Select a Minecraft version."); return; }
+            if (forge == null || forge.isBlank()) { alert("", "Select a Forge version."); return; }
+            installBtn.setDisable(true);
+            bar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
+            bar.setVisible(true);
+            status.setVisible(true);
+            ForgeInstaller.ProgressCallback fcb = (msg, pct) -> Platform.runLater(() -> {
+                status.setText(msg);
+                if (pct >= 0) bar.setProgress(pct / 100.0);
+            });
+            new Thread(() -> {
+                try {
+                    status.toString();
+                    Platform.runLater(() -> status.setText("[Vanilla] Installing base game first…"));
+                    MinecraftInstaller.installVersion(mc, (msg, pct) ->
+                        Platform.runLater(() -> {
+                            status.setText("[Vanilla] " + msg);
+                            if (pct >= 0) bar.setProgress(pct / 200.0);
+                        }));
+                    Platform.runLater(() -> { status.setText("Running Forge installer…"); bar.setProgress(0.5); });
+                    String versionId = ForgeInstaller.installForge(forge, fcb);
+                    Platform.runLater(() -> {
+                        bar.setProgress(1.0);
+                        status.setText("Done: " + versionId);
+                        installBtn.setDisable(false);
+                        activeProfile.setVersion(versionId);
+                        pm.upsert(activeProfile);
+                        refreshProfileBtn();
+                        alert("Installed!", versionId + " is ready!\nClick LAUNCH to play!");
+                        navigateTo(slotMain, sideHomeBtn);
+                    });
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                    Platform.runLater(() -> {
+                        status.setText("Error: " + ex.getMessage());
+                        bar.setProgress(0);
+                        installBtn.setDisable(false);
+                    });
+                }
+            }).start();
+        });
+
+        return tab;
+    }
+
     private void startFabricInstall() {
         String mc=installMcCombo.getValue(), loader=installLoaderCombo.getValue();
         if(mc==null||mc.isBlank()){alert("","Select a Minecraft version."); return;}
@@ -1092,9 +1164,8 @@ public class OnyxLauncher extends Application {
         }catch(Exception ex){ex.printStackTrace(); Platform.runLater(()->{installStatus.setText("Error: "+ex.getMessage()); installBar.setProgress(0); installStartBtn.setDisable(false);});}}).start();
     }
 
-    // =========================================================================
-    // Profile list page  – rebuilds slot content, does NOT create a new slot
-    // =========================================================================
+
+
     private void buildProfileList() {
         VBox root=new VBox(0); root.setStyle("-fx-background-color:#111111;");
 
@@ -1121,12 +1192,10 @@ public class OnyxLauncher extends Application {
         card.setStyle("-fx-border-color:"+p.getColor()+";"
             + (isActive ? "-fx-effect:dropshadow(gaussian,"+p.getColor()+",12,0.4,0,0);" : ""));
 
-        // icon: colored dot — green for active, grey for inactive
         Label icon = new Label("●");
         icon.setStyle("-fx-font-size:16px;-fx-text-fill:" + (isActive ? "#1db954" : "#333333") + ";"
             + "-fx-padding:3 4 0 0;");
 
-        // active badge
         Label activeBadge = new Label(isActive ? " ACTIVE" : "");
         activeBadge.setStyle("-fx-text-fill:"+p.getColor()+";-fx-font-size:10px;-fx-font-weight:bold;"
             +"-fx-background-color:"+p.getColor()+"22;-fx-padding:1 5;-fx-background-radius:4;");
@@ -1134,7 +1203,6 @@ public class OnyxLauncher extends Application {
         Label name=new Label(p.getName()); name.getStyleClass().add("profile-name");
         HBox nameRow=new HBox(6, icon, name, activeBadge); nameRow.setAlignment(Pos.CENTER_LEFT);
 
-        // version with type label
         String rawVer = p.getVersion();
         String typeTag;
         String displayVer;
@@ -1191,9 +1259,8 @@ public class OnyxLauncher extends Application {
         return card;
     }
 
-    // =========================================================================
-    // Profile edit page
-    // =========================================================================
+
+
     private void buildProfileEdit(Profile p) {
         if (p == null) p = Profile.createDefault("Default");
         final Profile prof = p;
@@ -1202,17 +1269,14 @@ public class OnyxLauncher extends Application {
         content.setPadding(new Insets(24, 32, 32, 32));
         content.setStyle("-fx-background-color:#111111;");
 
-        // ── Header ────────────────────────────────────────────────────────────
         Label title = new Label("Edit Profile  –  " + prof.getName());
         title.setStyle("-fx-text-fill:white;-fx-font-size:20px;-fx-font-weight:bold;");
         Button backBtn = btn("← Back", "btn", "btn-back"); hover(backBtn);
         backBtn.setOnAction(e -> { buildProfileList(); navigateTo(slotProfileList, sideProfilesBtn); });
         BorderPane hdr = new BorderPane(); hdr.setLeft(title); hdr.setRight(backBtn);
 
-        // ── Name ──────────────────────────────────────────────────────────────
         TextField nameF = field(prof.getName(), "Profile Name");
 
-        // ── Colour ────────────────────────────────────────────────────────────
         String[] COLS = {"#1db954","#4CAF50","#2196F3","#9C27B0","#F44336","#FF9800","#00BCD4","#607D8B"};
         ToggleGroup tg = new ToggleGroup();
         HBox colRow = new HBox(8);
@@ -1223,14 +1287,13 @@ public class OnyxLauncher extends Application {
             colRow.getChildren().add(tb);
         }
 
-        // ── Minecraft Version ─────────────────────────────────────────────────
         ComboBox<String> verCombo = new ComboBox<>();
         verCombo.setEditable(false);
         verCombo.setMaxWidth(Double.MAX_VALUE);
         verCombo.setVisibleRowCount(8);
         limitComboHeight(verCombo, 8);
         verCombo.setPromptText("Select a version…");
-        // populate from installed versions
+
         File vd = new File(AppConfig.getMinecraftDir(), "versions");
         if (vd.isDirectory()) {
             File[] vdirs = vd.listFiles(File::isDirectory);
@@ -1241,7 +1304,6 @@ public class OnyxLauncher extends Application {
         }
         if (!prof.getVersion().isEmpty()) verCombo.setValue(prof.getVersion());
 
-        // version info label (shows loader type)
         Label verInfo = new Label(); verInfo.setStyle("-fx-text-fill:#555;-fx-font-size:11px;");
         Runnable updateVerInfo = () -> {
             String v = verCombo.getValue() != null ? verCombo.getValue() : "";
@@ -1257,33 +1319,28 @@ public class OnyxLauncher extends Application {
         installLink.setStyle("-fx-text-fill:#1db954;-fx-background-color:transparent;-fx-font-size:12px;-fx-padding:2 0;");
         installLink.setOnAction(e -> showPage(slotInstall));
 
-        // ── Game directory ────────────────────────────────────────────────────
         TextField dirF = field(prof.getGameDir(), "Leave blank to use default .minecraft");
         Button browseDir = btn("Browse…", "btn", "btn-dark"); hover(browseDir);
         browseDir.setOnAction(e -> { DirectoryChooser dc = new DirectoryChooser(); File d = dc.showDialog(null); if (d != null) dirF.setText(d.getAbsolutePath()); });
         HBox dirRow = new HBox(8, dirF, browseDir); HBox.setHgrow(dirF, Priority.ALWAYS);
 
-        // ── Custom content paths ──────────────────────────────────────────────
-        // helper: one labeled path row
-        // Mods path
+
+
         TextField modsPathF = field(prof.getModsPath(), "blank = <gameDir>/mods");
         Button browseMods = btn("Browse…", "btn", "btn-dark"); hover(browseMods);
         browseMods.setOnAction(e -> { DirectoryChooser dc = new DirectoryChooser(); File d = dc.showDialog(null); if (d != null) modsPathF.setText(d.getAbsolutePath()); });
         HBox modsRow = new HBox(8, modsPathF, browseMods); HBox.setHgrow(modsPathF, Priority.ALWAYS);
 
-        // ResourcePacks path
         TextField rpPathF = field(prof.getResourcePacksPath(), "blank = <gameDir>/resourcepacks");
         Button browseRp = btn("Browse…", "btn", "btn-dark"); hover(browseRp);
         browseRp.setOnAction(e -> { DirectoryChooser dc = new DirectoryChooser(); File d = dc.showDialog(null); if (d != null) rpPathF.setText(d.getAbsolutePath()); });
         HBox rpRow = new HBox(8, rpPathF, browseRp); HBox.setHgrow(rpPathF, Priority.ALWAYS);
 
-        // Shaders path
         TextField shPathF = field(prof.getShadersPath(), "blank = <gameDir>/shaderpacks");
         Button browseSh = btn("Browse…", "btn", "btn-dark"); hover(browseSh);
         browseSh.setOnAction(e -> { DirectoryChooser dc = new DirectoryChooser(); File d = dc.showDialog(null); if (d != null) shPathF.setText(d.getAbsolutePath()); });
         HBox shRow = new HBox(8, shPathF, browseSh); HBox.setHgrow(shPathF, Priority.ALWAYS);
 
-        // ── RAM ───────────────────────────────────────────────────────────────
         long maxRam = 8192;
         try { maxRam = ManagementFactory.getPlatformMXBean(com.sun.management.OperatingSystemMXBean.class).getTotalPhysicalMemorySize() / (1024 * 1024); } catch (Exception ignored) {}
         Slider ramSlider = new Slider(512, maxRam, prof.getRamMB());
@@ -1295,15 +1352,13 @@ public class OnyxLauncher extends Application {
         ramSlider.valueProperty().addListener((ob, o, n) -> ramF.setText(String.valueOf(n.intValue())));
         HBox ramRow = new HBox(10, ramSlider, ramF, mbLbl); ramRow.setAlignment(Pos.CENTER_LEFT);
 
-        // ── JVM flags ─────────────────────────────────────────────────────────
-        // TextArea so multiple flags are easy to read/edit
+
         TextArea jvmArea = new TextArea(prof.getJvmArgs());
         jvmArea.setPrefRowCount(3);
         jvmArea.setWrapText(true);
         jvmArea.setPromptText("-XX:+UseG1GC -Xss4M -Dfml.readTimeout=90 …");
         jvmArea.setStyle("-fx-control-inner-background:#1a1a1a;-fx-text-fill:#e0e0e0;-fx-border-color:#2a2a2a;-fx-border-radius:6;-fx-background-radius:6;-fx-font-family:monospace;-fx-font-size:12px;");
 
-        // JVM presets
         HBox jvmPresets = new HBox(6);
         for (String[] preset : new String[][]{
                 {"Clear", ""},
@@ -1319,7 +1374,6 @@ public class OnyxLauncher extends Application {
             jvmPresets.getChildren().add(pb);
         }
 
-        // ── Resolution ────────────────────────────────────────────────────────
         TextField resW = field(String.valueOf(prof.getResWidth()), "1280"); resW.setPrefWidth(70);
         TextField resH = field(String.valueOf(prof.getResHeight()), "720"); resH.setPrefWidth(70);
         Label xLbl = new Label("×"); xLbl.setStyle("-fx-text-fill:#888;");
@@ -1328,15 +1382,13 @@ public class OnyxLauncher extends Application {
         HBox resRow = new HBox(8, resW, xLbl, resH, rSp, fsBox); resRow.setAlignment(Pos.CENTER_LEFT);
 
 
-        // ── Java executable ───────────────────────────────────────────────────
-        // Scan /usr/lib/jvm for available JVMs
         ComboBox<String> javaCombo = new ComboBox<>();
         javaCombo.setEditable(false);
         javaCombo.setMaxWidth(Double.MAX_VALUE);
         javaCombo.setVisibleRowCount(6);
         limitComboHeight(javaCombo, 6);
         javaCombo.setPromptText("Auto-detect (recommended)");
-        // add "Auto" option
+
         javaCombo.getItems().add("Auto-detect");
         File jvmRoot = new File("/usr/lib/jvm");
         if (jvmRoot.isDirectory()) {
@@ -1346,7 +1398,7 @@ public class OnyxLauncher extends Application {
                 for (File j : jvms) javaCombo.getItems().add(new File(j,"bin/java").getAbsolutePath());
             }
         }
-        // also check update-alternatives
+
         try {
             Process ap = Runtime.getRuntime().exec(new String[]{"update-alternatives","--list","java"});
             new java.io.BufferedReader(new java.io.InputStreamReader(ap.getInputStream()))
@@ -1368,12 +1420,10 @@ public class OnyxLauncher extends Application {
         });
         HBox javaRow = new HBox(8, javaCombo, browseJava); HBox.setHgrow(javaCombo, Priority.ALWAYS);
 
-        // ── Mods manager shortcut ─────────────────────────────────────────────
         Button modsBtn = btn("📦  Manage Mods / ResourcePacks / Shaders", "btn", "btn-dark");
         modsBtn.setMaxWidth(Double.MAX_VALUE); modsBtn.setPrefHeight(40); hover(modsBtn);
         modsBtn.setOnAction(e -> { buildContentManager(prof); showPage(slotContentManager); });
 
-        // ── Save ──────────────────────────────────────────────────────────────
         Button saveBtn = btn("Save", "btn", "btn-primary");
         saveBtn.setPrefWidth(120); saveBtn.setPrefHeight(42); hover(saveBtn);
         saveBtn.setOnAction(e -> {
@@ -1416,12 +1466,367 @@ public class OnyxLauncher extends Application {
         setSlot(slotProfileEdit, sp);
     }
 
-    // =========================================================================
-    // Content manager (Mods / ResourcePacks / Shaders)
-    // =========================================================================
+
+
+    private void buildContentBrowser() {
+        VBox root = new VBox(0);
+        root.setStyle("-fx-background-color:#111111;");
+        Label title = new Label("Get Content");
+        title.setStyle("-fx-text-fill:white;-fx-font-size:20px;-fx-font-weight:bold;");
+        BorderPane hdr = new BorderPane();
+        hdr.setLeft(title);
+        hdr.getStyleClass().add("page-header");
+        hdr.setPadding(new Insets(18, 24, 14, 24));
+        TabPane tabs = new TabPane();
+        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        tabs.getTabs().addAll(
+            contentHomeTab(),
+            contentTab("Mods",           ModrinthClient.ProjectType.MOD),
+            contentTab("Resource Packs", ModrinthClient.ProjectType.RESOURCEPACK),
+            contentTab("Shaders",        ModrinthClient.ProjectType.SHADER),
+            contentTab("Modpacks",       ModrinthClient.ProjectType.MODPACK)
+        );
+        VBox.setVgrow(tabs, Priority.ALWAYS);
+        root.getChildren().addAll(hdr, tabs);
+        setSlot(slotContentBrowser, root);
+    }
+
+    private Tab contentHomeTab() {
+        Tab tab = new Tab("Home");
+        ScrollPane scroll = new ScrollPane();
+        scroll.setFitToWidth(true);
+        scroll.getStyleClass().add("scroll-pane");
+        scroll.setStyle("-fx-background-color:#111111;");
+        VBox page = new VBox(28);
+        page.setPadding(new Insets(24, 28, 28, 28));
+        page.setStyle("-fx-background-color:#111111;");
+        scroll.setContent(page);
+        tab.setContent(scroll);
+        tab.selectedProperty().addListener((ob, o, n) -> {
+            if (!n || !page.getChildren().isEmpty()) return;
+            Label loading = new Label("Loading popular content...");
+            loading.setStyle("-fx-text-fill:#555;-fx-font-size:14px;");
+            page.getChildren().add(loading);
+            String raw = activeProfile.getVersion()
+                .replaceAll("^fabric-loader-[^-]+-", "")
+                .replaceAll("(?i)-forge-.*", "")
+                .replaceAll("(?i)^forge-", "");
+            final String mv = (raw.isBlank() || raw.contains("loader")) ? null : raw;
+            new Thread(() -> {
+                try {
+                    List<ModrinthClient.ModrinthProject> mods    = ModrinthClient.search("", ModrinthClient.ProjectType.MOD,          mv,   6);
+                    List<ModrinthClient.ModrinthProject> packs   = ModrinthClient.search("", ModrinthClient.ProjectType.MODPACK,      mv,   6);
+                    List<ModrinthClient.ModrinthProject> shaders = ModrinthClient.search("", ModrinthClient.ProjectType.SHADER,       null, 6);
+                    List<ModrinthClient.ModrinthProject> rp      = ModrinthClient.search("", ModrinthClient.ProjectType.RESOURCEPACK, null, 6);
+                    Platform.runLater(() -> {
+                        page.getChildren().clear();
+                        if (!mods.isEmpty())    page.getChildren().add(popularSection("Popular Mods",            mods,    ModrinthClient.ProjectType.MOD,          mv));
+                        if (!packs.isEmpty())   page.getChildren().add(popularSection("Popular Modpacks",        packs,   ModrinthClient.ProjectType.MODPACK,      mv));
+                        if (!shaders.isEmpty()) page.getChildren().add(popularSection("Popular Shaders",         shaders, ModrinthClient.ProjectType.SHADER,       null));
+                        if (!rp.isEmpty())      page.getChildren().add(popularSection("Popular Resource Packs",  rp,      ModrinthClient.ProjectType.RESOURCEPACK, null));
+                    });
+                } catch (Exception ex) {
+                    Platform.runLater(() -> {
+                        page.getChildren().clear();
+                        Label err = new Label("Failed to load: " + ex.getMessage());
+                        err.setStyle("-fx-text-fill:#e53935;-fx-font-size:13px;");
+                        page.getChildren().add(err);
+                    });
+                }
+            }).start();
+        });
+        return tab;
+    }
+
+    private VBox popularSection(String sectionTitle,
+                                List<ModrinthClient.ModrinthProject> items,
+                                ModrinthClient.ProjectType type,
+                                String mcVer) {
+        VBox section = new VBox(8);
+        Label hdrL = new Label(sectionTitle);
+        hdrL.setStyle("-fx-text-fill:#ffffff;-fx-font-size:15px;-fx-font-weight:bold;-fx-padding:0 0 4 0;");
+        section.getChildren().add(hdrL);
+        for (ModrinthClient.ModrinthProject item : items) {
+            HBox card = new HBox(14);
+            card.setAlignment(Pos.CENTER_LEFT);
+            card.setPadding(new Insets(11, 16, 11, 16));
+            String baseStyle =
+                "-fx-background-color:#181818;" +
+                "-fx-background-radius:8;" +
+                "-fx-border-color:#252525;" +
+                "-fx-border-radius:8;" +
+                "-fx-border-width:1;";
+            card.setStyle(baseStyle);
+            card.setOnMouseEntered(e -> card.setStyle(
+                "-fx-background-color:#1e1e1e;" +
+                "-fx-background-radius:8;" +
+                "-fx-border-color:#2e2e2e;" +
+                "-fx-border-radius:8;" +
+                "-fx-border-width:1;"));
+            card.setOnMouseExited(e -> card.setStyle(baseStyle));
+            Label nameL = new Label(item.title);
+            nameL.setStyle("-fx-text-fill:#ffffff;-fx-font-size:13px;-fx-font-weight:bold;");
+            nameL.setMaxWidth(360);
+            Label descL = new Label(item.description);
+            descL.setStyle("-fx-text-fill:#555555;-fx-font-size:11px;");
+            descL.setMaxWidth(360);
+            Label dlL = new Label("⬇  " + formatDownloads(item.downloads));
+            dlL.setStyle("-fx-text-fill:#1db954;-fx-font-size:11px;");
+            VBox info = new VBox(2, nameL, descL, dlL);
+            info.setAlignment(Pos.CENTER_LEFT);
+            HBox.setHgrow(info, Priority.ALWAYS);
+            Button installBtn = btn("Install", "btn", "btn-primary");
+            installBtn.setPrefHeight(30);
+            final String mv2 = mcVer;
+            installBtn.setOnAction(e -> handleInstall(item, mv2, type, installBtn));
+            card.getChildren().addAll(info, installBtn);
+            section.getChildren().add(card);
+        }
+        return section;
+    }
+
+
+    private Tab contentTab(String label, ModrinthClient.ProjectType type) {
+        Tab tab = new Tab(label);
+
+        VBox box = new VBox(0);
+        box.setStyle("-fx-background-color:#111111;");
+
+        HBox filterRow = new HBox(10);
+        filterRow.setPadding(new Insets(14, 18, 10, 18));
+        filterRow.setAlignment(Pos.CENTER_LEFT);
+
+        TextField searchField = new TextField();
+        searchField.setPromptText("Search " + label + "…");
+        searchField.setPrefWidth(280);
+        HBox.setHgrow(searchField, Priority.ALWAYS);
+
+        ComboBox<String> mcVerCombo = new ComboBox<>();
+        mcVerCombo.setPromptText("MC Version");
+        mcVerCombo.setPrefWidth(130);
+        mcVerCombo.setVisibleRowCount(8);
+        limitComboHeight(mcVerCombo, 8);
+
+        Button searchBtn = btn("Search", "btn", "btn-primary");
+        searchBtn.setPrefHeight(36);
+        hover(searchBtn);
+
+        filterRow.getChildren().addAll(searchField, mcVerCombo, searchBtn);
+
+        Label statusLbl = new Label("");
+        statusLbl.setStyle("-fx-text-fill:#888;-fx-font-size:12px;-fx-padding:0 18;");
+        statusLbl.setVisible(false);
+
+        ListView<ModrinthClient.ModrinthProject> resultList = new ListView<>();
+        resultList.getStyleClass().add("list-view");
+        VBox.setVgrow(resultList, Priority.ALWAYS);
+        resultList.setCellFactory(lv -> new ListCell<>() {
+            @Override
+            protected void updateItem(ModrinthClient.ModrinthProject item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) { setGraphic(null); setText(null); return; }
+
+                Label nameL = new Label(item.title);
+                nameL.setStyle("-fx-text-fill:#ffffff;-fx-font-size:14px;-fx-font-weight:bold;");
+                nameL.setMaxWidth(340);
+
+                Label descL = new Label(item.description);
+                descL.setStyle("-fx-text-fill:#888888;-fx-font-size:11px;");
+                descL.setMaxWidth(400);
+                descL.setWrapText(false);
+
+                Label dlL = new Label("⬇  " + formatDownloads(item.downloads));
+                dlL.setStyle("-fx-text-fill:#1db954;-fx-font-size:11px;");
+
+                VBox left = new VBox(3, nameL, descL, dlL);
+                left.setAlignment(Pos.CENTER_LEFT);
+                HBox.setHgrow(left, Priority.ALWAYS);
+
+                Button installBtn = btn("Install", "btn", "btn-primary");
+                installBtn.setPrefHeight(32);
+                installBtn.setOnAction(e -> handleInstall(item, mcVerCombo.getValue(), type, installBtn));
+
+                HBox row = new HBox(12, left, installBtn);
+                row.setAlignment(Pos.CENTER_LEFT);
+                row.setPadding(new Insets(8, 12, 8, 12));
+                setGraphic(row);
+                setStyle("-fx-background-color:transparent;");
+            }
+        });
+
+        Label emptyLbl = new Label("Search for " + label.toLowerCase() + " above.");
+        emptyLbl.setStyle("-fx-text-fill:#444;-fx-font-size:14px;");
+        StackPane center = new StackPane(resultList, emptyLbl);
+        VBox.setVgrow(center, Priority.ALWAYS);
+        resultList.setVisible(false);
+
+        box.getChildren().addAll(filterRow, statusLbl, center);
+        tab.setContent(box);
+
+        tab.selectedProperty().addListener((ob, o, n) -> {
+            if (n && mcVerCombo.getItems().isEmpty()) {
+                new Thread(() -> {
+                    try {
+                        List<String> vers = MinecraftInstaller.fetchVersionsByType("release");
+                        Platform.runLater(() -> {
+                            mcVerCombo.setItems(FXCollections.observableArrayList(vers));
+                            if (!vers.isEmpty()) mcVerCombo.getSelectionModel().selectFirst();
+                        });
+                    } catch (Exception ignored) {}
+                }).start();
+            }
+        });
+
+        AtomicBoolean searching = new AtomicBoolean(false);
+        Runnable doSearch = () -> {
+            if (searching.get()) return;
+            String q = searchField.getText().trim();
+            String mcVer = mcVerCombo.getValue();
+            searching.set(true);
+            searchBtn.setDisable(true);
+            statusLbl.setText("Searching…");
+            statusLbl.setVisible(true);
+            emptyLbl.setVisible(false);
+            resultList.setVisible(false);
+            new Thread(() -> {
+                try {
+                    List<ModrinthClient.ModrinthProject> results =
+                        ModrinthClient.search(q.isEmpty() ? " " : q, type, mcVer, 30);
+                    Platform.runLater(() -> {
+                        resultList.setItems(FXCollections.observableArrayList(results));
+                        resultList.setVisible(true);
+                        statusLbl.setText(results.size() + " results");
+                        searching.set(false);
+                        searchBtn.setDisable(false);
+                    });
+                } catch (Exception ex) {
+                    Platform.runLater(() -> {
+                        statusLbl.setText("Error: " + ex.getMessage());
+                        searching.set(false);
+                        searchBtn.setDisable(false);
+                    });
+                }
+            }).start();
+        };
+
+        searchBtn.setOnAction(e -> doSearch.run());
+        searchField.setOnAction(e -> doSearch.run());
+
+        return tab;
+    }
+
+    private void handleInstall(ModrinthClient.ModrinthProject project,
+                               String mcVersion,
+                               ModrinthClient.ProjectType type,
+                               Button installBtn) {
+        installBtn.setDisable(true);
+        installBtn.setText("…");
+
+        new Thread(() -> {
+            try {
+                List<ModrinthClient.ModrinthVersion> versions =
+                    ModrinthClient.getVersions(project.projectId, mcVersion);
+
+                if (versions.isEmpty()) {
+                    Platform.runLater(() -> {
+                        alert("No files", "No compatible files found for this version.");
+                        installBtn.setDisable(false);
+                        installBtn.setText("Install");
+                    });
+                    return;
+                }
+
+                Platform.runLater(() -> {
+                    ChoiceDialog<ModrinthClient.ModrinthVersion> dlg =
+                        new ChoiceDialog<>(versions.get(0), versions);
+                    dlg.setTitle("Choose Version");
+                    dlg.setHeaderText(project.title);
+                    dlg.setContentText("Version:");
+                    dlg.showAndWait().ifPresentOrElse(
+                        chosen -> downloadContent(chosen, type, project, installBtn),
+                        () -> {
+                            installBtn.setDisable(false);
+                            installBtn.setText("Install");
+                        }
+                    );
+                });
+            } catch (Exception ex) {
+                Platform.runLater(() -> {
+                    alert("Error", ex.getMessage());
+                    installBtn.setDisable(false);
+                    installBtn.setText("Install");
+                });
+            }
+        }).start();
+    }
+
+    private void downloadContent(ModrinthClient.ModrinthVersion version,
+                                 ModrinthClient.ProjectType type,
+                                 ModrinthClient.ModrinthProject project,
+                                 Button installBtn) {
+        String targetDir = switch (type) {
+            case MOD          -> activeProfile.modsDir();
+            case RESOURCEPACK -> activeProfile.resourcePacksDir();
+            case SHADER       -> activeProfile.shadersDir();
+            case MODPACK      -> activeProfile.effectiveGameDir() + java.io.File.separator + "modpacks";
+        };
+
+        installBtn.setText("↓");
+        new Thread(() -> {
+            try {
+                java.io.File dest = ModrinthClient.download(version, targetDir,
+                    (msg, pct) -> Platform.runLater(() -> installBtn.setText(pct + "%")));
+
+                if (type == ModrinthClient.ProjectType.MODPACK) {
+                    Platform.runLater(() -> {
+                        Alert ask = new Alert(Alert.AlertType.CONFIRMATION);
+                        ask.setTitle("Create Profile?");
+                        ask.setHeaderText("Create a new profile for " + "  project.title  " + "?");
+                        ask.setContentText("A profile will be set up using this modpack's folder.");
+                        ask.showAndWait().ifPresent(btn -> {
+                            if (btn == ButtonType.OK) {
+                                Profile p = Profile.createDefault(project.title);
+                                p.setGameDir(dest.getParent());
+                                p.setModsPath(activeProfile.modsDir());
+                                pm.upsert(p);
+                                activeProfile = p;
+                                settings.setActiveProfileId(p.getId());
+                                settings.save();
+                                refreshProfileBtn();
+                                refreshProfilePopup();
+                                alert("Done!", "Profile " + "  p.getName()  " + " created.");
+                            }
+                        });
+                    });
+                } else {
+                    Platform.runLater(() -> {
+                        alert("Installed!", version.filename + " saved to:\n" + targetDir);
+                    });
+                }
+
+                Platform.runLater(() -> {
+                    installBtn.setDisable(false);
+                    installBtn.setText("✓ Done");
+                });
+            } catch (Exception ex) {
+                Platform.runLater(() -> {
+                    alert("Download failed", ex.getMessage());
+                    installBtn.setDisable(false);
+                    installBtn.setText("Install");
+                });
+            }
+        }).start();
+    }
+
+    private static String formatDownloads(long n) {
+        if (n >= 1_000_000) return String.format("%.1fM", n / 1_000_000.0);
+        if (n >= 1_000)     return String.format("%.1fK", n / 1_000.0);
+        return String.valueOf(n);
+    }
+
     private void buildContentManager(Profile profile) {
         if(profile==null) profile=activeProfile;
-        final Profile prof=profile;
+        final Profile prof = profile;
 
         VBox root=new VBox(0); root.setStyle("-fx-background-color:#111111;");
         Label title=new Label("Content Manager  –  "+prof.getName());
@@ -1452,7 +1857,6 @@ public class OnyxLauncher extends Application {
         Tab tab=new Tab(label);
         BorderPane pane=new BorderPane(); pane.setStyle("-fx-background-color:#111111;");
 
-        // left: installed
         VBox left=new VBox(8); left.setPrefWidth(240); left.setPadding(new Insets(14,10,14,14));
         left.setStyle("-fx-background-color:#161616;");
         Label instHdr=new Label("Installed"); instHdr.getStyleClass().add("label-section");
@@ -1464,7 +1868,6 @@ public class OnyxLauncher extends Application {
         removeBtn.setOnAction(e->{String s=instList.getSelectionModel().getSelectedItem(); if(s!=null){new File(targetDir,s).delete(); refreshInstalled(instList,targetDir);}});
         left.getChildren().addAll(instHdr,instList,openBtn,removeBtn);
 
-        // right: search
         VBox right=new VBox(10); right.setPadding(new Insets(14,16,14,10)); right.setStyle("-fx-background-color:#111111;");
         TextField searchF=new TextField(); searchF.setPromptText("Search Modrinth for "+label+"…"); HBox.setHgrow(searchF,Priority.ALWAYS);
         Button searchBtn=btn("Search","btn","btn-primary"); hover(searchBtn);
@@ -1526,9 +1929,8 @@ public class OnyxLauncher extends Application {
         if(fs!=null) for(File f:fs) lv.getItems().add(f.getName());
     }
 
-    // =========================================================================
-    // Tray
-    // =========================================================================
+
+
     private void hideToTray(Stage stage) {
         if(!SystemTray.isSupported()){stage.setIconified(true);return;}
         stage.hide();
@@ -1551,9 +1953,8 @@ public class OnyxLauncher extends Application {
         stage.show(); stage.toFront();
     }
 
-    // =========================================================================
-    // UI helpers
-    // =========================================================================
+
+
     private VBox popupCard() {
         VBox v=new VBox(2); v.getStyleClass().add("popup-card");
         v.setVisible(false); v.setMaxSize(Region.USE_PREF_SIZE,Region.USE_PREF_SIZE);
@@ -1563,7 +1964,6 @@ public class OnyxLauncher extends Application {
         Button b=new Button(text); b.getStyleClass().addAll(css); return b;
     }
 
-    /** Builds a Lucide-style SVG icon as a JavaFX node, scaled to the given size. */
     private static javafx.scene.Node svgIcon(String... pathData) {
         javafx.scene.Group group = new javafx.scene.Group();
         for (String d : pathData) {
@@ -1576,14 +1976,13 @@ public class OnyxLauncher extends Application {
             p.setStrokeLineJoin(javafx.scene.shape.StrokeLineJoin.ROUND);
             group.getChildren().add(p);
         }
-        // SVG viewBox is 0 0 24 24 — scale to 20px
+
         group.setScaleX(20.0 / 24.0);
         group.setScaleY(20.0 / 24.0);
         group.setMouseTransparent(true);
         return group;
     }
 
-    // Lucide SVG paths (viewBox 0 0 24 24)
     private static final String[] ICON_HOME = {
         "M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8",
         "M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
@@ -1599,20 +1998,25 @@ public class OnyxLauncher extends Application {
         "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4",
         "m7 10 5 5 5-5"
     };
-    // settings-2: two slider circles with horizontal lines (cleaner than gear)
+
     private static final String[] ICON_SETTINGS = {
         "M14 17H5",
         "M19 7h-9",
         "M17 14 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0",
         "M7 4 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0"
     };
-    // terminal icon: window frame + prompt
+
     private static final String[] ICON_TERMINAL = {
         "M4 17l6-6-6-6",
         "M12 19h8"
     };
+    private static final String[] ICON_CONTENT = {
+        "M20 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z",
+        "M12 12h.01",
+        "M8 12h.01",
+        "M16 12h.01"
+    };
 
-    /** Creates a sidebar nav button with SVG icon + label side by side. */
     private Button sideNavBtn(String[] iconPaths, String label, boolean active) {
         javafx.scene.Node iconNode = svgIcon(iconPaths);
         StackPane iconBox = new StackPane(iconNode);
@@ -1633,7 +2037,6 @@ public class OnyxLauncher extends Application {
         b.getStyleClass().add("sidebar-btn");
         if (active) b.getStyleClass().add("sidebar-btn-active");
 
-        // ── Press / release scale animation ──────────────────────────────────
         b.setOnMousePressed(e -> {
             javafx.animation.ScaleTransition press =
                 new javafx.animation.ScaleTransition(Duration.millis(80), b);
@@ -1661,7 +2064,6 @@ public class OnyxLauncher extends Application {
         }
     }
 
-    /** Extracts the SVG Group node from a sidebar button's graphic. */
     private static javafx.scene.Node svgGroupOf(Button btn) {
         if (btn.getGraphic() instanceof HBox hb && !hb.getChildren().isEmpty()
                 && hb.getChildren().get(0) instanceof StackPane sp
@@ -1671,7 +2073,6 @@ public class OnyxLauncher extends Application {
         return null;
     }
 
-    /** Switches the active highlight to the given sidebar button. */
     private void setSideActive(Button btn) {
         if (activeSideBtn != null) {
             activeSideBtn.getStyleClass().remove("sidebar-btn-active");
@@ -1698,7 +2099,6 @@ public class OnyxLauncher extends Application {
         a.setTitle(title); a.setHeaderText(null); a.setContentText(msg); a.showAndWait();
     }
 
-    /** Loads a font from the JAR classpath and registers it with JavaFX. */
     private void loadFont(String resourcePath) {
         try (InputStream is = getClass().getResourceAsStream(resourcePath)) {
             if (is != null) javafx.scene.text.Font.loadFont(is, 13);
@@ -1707,16 +2107,11 @@ public class OnyxLauncher extends Application {
         }
     }
 
-
-    /**
-     * Limits the dropdown popup of a ComboBox to a fixed number of visible rows.
-     * Must be called after the ComboBox is added to a scene (use setOnShowing).
-     */
     private static void limitComboHeight(ComboBox<?> combo, int maxRows) {
         combo.setVisibleRowCount(maxRows);
         combo.showingProperty().addListener((obs, wasShowing, isShowing) -> {
             if (isShowing) {
-                // Reach into the skin's ListView and clamp its height
+
                 javafx.scene.control.skin.ComboBoxListViewSkin<?> skin =
                     (javafx.scene.control.skin.ComboBoxListViewSkin<?>) combo.getSkin();
                 if (skin != null) {
@@ -1731,7 +2126,6 @@ public class OnyxLauncher extends Application {
         });
     }
 
-    /** Highlights a GPU card as selected (bold border + darker bg). */
     private static void applyGpuCardSelected(VBox card, String color) {
         card.setStyle("-fx-background-color:#1a1a1a;-fx-background-radius:8;"
             + "-fx-border-radius:8;-fx-border-width:2;"

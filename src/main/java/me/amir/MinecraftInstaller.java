@@ -14,14 +14,6 @@ import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Downloads and installs vanilla Minecraft versions.
- *
- * Features:
- * - Parallel library/asset downloads (8 threads)
- * - SHA-1 based resume: skips files that are already correct
- * - Progress callback with 0-100 %
- */
 public class MinecraftInstaller {
 
     private static final String MANIFEST_URL =
@@ -31,10 +23,6 @@ public class MinecraftInstaller {
         void onProgress(String message, int percent);
     }
 
-    // -------------------------------------------------------------------------
-    // Version lists
-    // -------------------------------------------------------------------------
-
     public static List<String> fetchReleaseVersions() throws Exception {
         return fetchVersionsByType("release");
     }
@@ -43,11 +31,6 @@ public class MinecraftInstaller {
         return fetchVersionsByType(null);
     }
 
-    /**
-     * Returns version IDs filtered by Mojang type.
-     * Known types: "release", "snapshot", "old_beta", "old_alpha"
-     * Pass null for all types.
-     */
     public static List<String> fetchVersionsByType(String type) throws Exception {
         JsonArray versions = fetchObject(MANIFEST_URL).getAsJsonArray("versions");
         List<String> result = new ArrayList<>();
@@ -58,10 +41,6 @@ public class MinecraftInstaller {
         }
         return result;
     }
-
-    // -------------------------------------------------------------------------
-    // Install
-    // -------------------------------------------------------------------------
 
     public static void installVersion(String versionId, ProgressCallback cb) throws Exception {
         String mcDir = AppConfig.getMinecraftDir();
@@ -82,7 +61,6 @@ public class MinecraftInstaller {
         cb.onProgress("Fetching version JSON…", 4);
         JsonObject versionJson = fetchObject(versionUrl);
 
-        // ── 1. Save version JSON ──────────────────────────────────────────────
         File versionDir = new File(mcDir, "versions/" + versionId);
         versionDir.mkdirs();
         File jsonFile = new File(versionDir, versionId + ".json");
@@ -90,7 +68,6 @@ public class MinecraftInstaller {
             fw.write(versionJson.toString());
         }
 
-        // ── 2. Client JAR ─────────────────────────────────────────────────────
         cb.onProgress("Downloading client JAR…", 6);
         JsonObject clientDl = versionJson.getAsJsonObject("downloads").getAsJsonObject("client");
         String jarUrl  = clientDl.get("url").getAsString();
@@ -103,12 +80,10 @@ public class MinecraftInstaller {
             cb.onProgress("Client JAR already up-to-date", 20);
         }
 
-        // ── 3. Libraries (parallel) ───────────────────────────────────────────
         cb.onProgress("Downloading libraries…", 20);
         JsonArray libraries = versionJson.getAsJsonArray("libraries");
         downloadLibrariesParallel(mcDir, libraries, cb, 20, 55);
 
-        // ── 4. Asset index ────────────────────────────────────────────────────
         cb.onProgress("Downloading asset index…", 55);
         JsonObject assetIdx    = versionJson.getAsJsonObject("assetIndex");
         String     assetId     = assetIdx.get("id").getAsString();
@@ -120,17 +95,12 @@ public class MinecraftInstaller {
             downloadFile(assetIdxUrl, assetIdxFile, -1, 55, 57, cb);
         }
 
-        // ── 5. Asset objects (parallel) ───────────────────────────────────────
         cb.onProgress("Downloading assets…", 57);
         JsonObject objects = fetchObject(assetIdxUrl).getAsJsonObject("objects");
         downloadAssetsParallel(mcDir, objects, cb, 57, 99);
 
         cb.onProgress("Installation complete!", 100);
     }
-
-    // -------------------------------------------------------------------------
-    // Parallel library download
-    // -------------------------------------------------------------------------
 
     private static void downloadLibrariesParallel(String mcDir, JsonArray libraries,
             ProgressCallback cb, int pctStart, int pctEnd) throws Exception {
@@ -164,7 +134,6 @@ public class MinecraftInstaller {
                     }
                 }
 
-                // Natives classifier
                 String nativeKey = getNativeClassifier(lib, osName);
                 if (nativeKey != null && dl.has("classifiers")) {
                     JsonObject cls = dl.getAsJsonObject("classifiers");
@@ -192,10 +161,6 @@ public class MinecraftInstaller {
         runParallel(tasks, cb, pctStart, pctEnd);
     }
 
-    // -------------------------------------------------------------------------
-    // Parallel asset download
-    // -------------------------------------------------------------------------
-
     private static void downloadAssetsParallel(String mcDir, JsonObject objects,
             ProgressCallback cb, int pctStart, int pctEnd) throws Exception {
 
@@ -209,21 +174,17 @@ public class MinecraftInstaller {
             long   size = asset.get("size").getAsLong();
             String sub  = hash.substring(0, 2);
             File   dest = new File(objectsDir, sub + "/" + hash);
-            if (isFileValid(dest, size, null)) continue; // already correct
+            if (isFileValid(dest, size, null)) continue;
             String url  = "https://resources.download.minecraft.net/" + sub + "/" + hash;
             tasks.add(() -> {
                 dest.getParentFile().mkdirs();
                 try { downloadFile(url, dest, size, -1, -1, null); }
-                catch (Exception e) { /* skip single bad asset */ }
+                catch (Exception e) {  }
             });
         }
 
         runParallel(tasks, cb, pctStart, pctEnd);
     }
-
-    // -------------------------------------------------------------------------
-    // Thread pool executor
-    // -------------------------------------------------------------------------
 
     private static void runParallel(List<Runnable> tasks, ProgressCallback cb,
                                     int pctStart, int pctEnd) throws Exception {
@@ -245,21 +206,15 @@ public class MinecraftInstaller {
             }));
         }
         pool.shutdown();
-        // Collect exceptions
         for (Future<?> f : futures) {
             try { f.get(); }
-            catch (ExecutionException e) { /* individual errors already logged */ }
+            catch (ExecutionException e) {  }
         }
         if (cb != null) cb.onProgress(total + "/" + total + " files", pctEnd);
     }
 
-    // -------------------------------------------------------------------------
-    // File download (single, with range-resume support)
-    // -------------------------------------------------------------------------
-
     static void downloadFile(String urlStr, File dest, long expectedSize,
                              int startPct, int endPct, ProgressCallback cb) throws Exception {
-        // Resume: if partial file exists, try Range request
         long existing = dest.exists() ? dest.length() : 0;
 
         URL url = new URL(urlStr);
@@ -271,7 +226,7 @@ public class MinecraftInstaller {
         conn.connect();
 
         int status = conn.getResponseCode();
-        boolean append = (status == HttpURLConnection.HTTP_PARTIAL); // 206
+        boolean append = (status == HttpURLConnection.HTTP_PARTIAL);
         if (status != HttpURLConnection.HTTP_OK && !append) {
             throw new IOException("HTTP " + status + " for " + urlStr);
         }
@@ -295,14 +250,6 @@ public class MinecraftInstaller {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // SHA-1 validation
-    // -------------------------------------------------------------------------
-
-    /**
-     * Returns true if the file exists, matches the expected size (if > 0),
-     * and matches the SHA-1 hash (if provided).
-     */
     static boolean isFileValid(File f, long expectedSize, String expectedSha1) {
         if (!f.exists()) return false;
         if (expectedSize > 0 && f.length() != expectedSize) return false;
@@ -327,10 +274,6 @@ public class MinecraftInstaller {
         return sb.toString();
     }
 
-    // -------------------------------------------------------------------------
-    // JSON helpers
-    // -------------------------------------------------------------------------
-
     static JsonObject fetchObject(String urlStr) throws Exception {
         try (InputStreamReader r = new InputStreamReader(open(urlStr).getInputStream())) {
             return JsonParser.parseReader(r).getAsJsonObject();
@@ -344,10 +287,6 @@ public class MinecraftInstaller {
         c.setReadTimeout(30_000);
         return c;
     }
-
-    // -------------------------------------------------------------------------
-    // OS / native helpers
-    // -------------------------------------------------------------------------
 
     private static boolean isLibraryAllowed(JsonObject lib, String osName) {
         if (!lib.has("rules")) return true;
@@ -369,7 +308,6 @@ public class MinecraftInstaller {
         if (!lib.has("natives")) return null;
         JsonObject natives = lib.getAsJsonObject("natives");
         if (natives.has(osName)) {
-            // replace ${arch} if present
             String key = natives.get(osName).getAsString();
             String arch = System.getProperty("os.arch").contains("64") ? "64" : "32";
             return key.replace("${arch}", arch);

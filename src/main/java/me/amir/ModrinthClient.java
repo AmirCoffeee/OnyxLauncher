@@ -13,20 +13,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Thin client for the Modrinth API v2.
- * Supports searching mods, resourcepacks, and shaderpacks,
- * and downloading a specific version file into a target folder.
- */
 public class ModrinthClient {
 
     private static final String BASE = "https://api.modrinth.com/v2";
 
-    // -------------------------------------------------------------------------
-    // Data model
-    // -------------------------------------------------------------------------
-
-    public enum ProjectType { MOD, RESOURCEPACK, SHADER }
+    public enum ProjectType { MOD, RESOURCEPACK, SHADER, MODPACK }
 
     public static class ModrinthProject {
         public final String projectId;
@@ -73,29 +64,17 @@ public class ModrinthClient {
         @Override public String toString() { return versionNumber + " — " + name; }
     }
 
-    // -------------------------------------------------------------------------
-    // Search
-    // -------------------------------------------------------------------------
-
-    /**
-     * Search Modrinth for projects.
-     *
-     * @param query       free-text query
-     * @param type        MOD, RESOURCEPACK, or SHADER
-     * @param mcVersion   e.g. "1.21.1", or null/empty for any
-     * @param limit       max results (1-100)
-     */
     public static List<ModrinthProject> search(String query, ProjectType type,
                                                String mcVersion, int limit) throws Exception {
         StringBuilder url = new StringBuilder(BASE + "/search?");
         url.append("query=").append(enc(query));
         url.append("&limit=").append(Math.min(limit, 100));
 
-        // facets
         String modrinthType = switch (type) {
             case MOD          -> "mod";
             case RESOURCEPACK -> "resourcepack";
             case SHADER       -> "shader";
+            case MODPACK      -> "modpack";
         };
         StringBuilder facets = new StringBuilder("[[\"project_type:" + modrinthType + "\"]");
         if (mcVersion != null && !mcVersion.isEmpty())
@@ -120,14 +99,6 @@ public class ModrinthClient {
         return out;
     }
 
-    // -------------------------------------------------------------------------
-    // Version list for a project
-    // -------------------------------------------------------------------------
-
-    /**
-     * Returns all versions of a project compatible with the given MC version.
-     * Pass null/empty mcVersion to get all versions.
-     */
     public static List<ModrinthVersion> getVersions(String projectId,
                                                     String mcVersion) throws Exception {
         StringBuilder url = new StringBuilder(BASE + "/project/" + projectId + "/version?");
@@ -138,12 +109,10 @@ public class ModrinthClient {
         List<ModrinthVersion> out = new ArrayList<>();
         for (JsonElement el : arr) {
             JsonObject v = el.getAsJsonObject();
-            // Pick the first file in the version
             if (!v.has("files")) continue;
             JsonArray files = v.getAsJsonArray("files");
             if (files.isEmpty()) continue;
 
-            // Prefer the primary file
             JsonObject primaryFile = files.get(0).getAsJsonObject();
             for (JsonElement fe : files) {
                 JsonObject fobj = fe.getAsJsonObject();
@@ -165,22 +134,10 @@ public class ModrinthClient {
         return out;
     }
 
-    // -------------------------------------------------------------------------
-    // Download
-    // -------------------------------------------------------------------------
-
     public interface ProgressCallback {
         void onProgress(String msg, int percent);
     }
 
-    /**
-     * Downloads a mod/resourcepack/shader file to the target directory.
-     *
-     * @param version    the version to download
-     * @param targetDir  e.g. profile.modsDir() or profile.effectiveGameDir()+"/resourcepacks"
-     * @param cb         progress callback (may be null)
-     * @return the downloaded File
-     */
     public static File download(ModrinthVersion version, String targetDir,
                                 ProgressCallback cb) throws Exception {
         File dir = new File(targetDir);
@@ -213,10 +170,6 @@ public class ModrinthClient {
         if (cb != null) cb.onProgress("Done: " + version.filename, 100);
         return dest;
     }
-
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
 
     private static JsonObject fetchObject(String urlStr) throws Exception {
         try (InputStreamReader r = new InputStreamReader(open(urlStr).getInputStream())) {

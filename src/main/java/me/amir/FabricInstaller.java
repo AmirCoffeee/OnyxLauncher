@@ -1,25 +1,15 @@
 package me.amir;
-
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Downloads and installs Fabric Loader for a given Minecraft version.
- *
- * API used: https://meta.fabricmc.net/v2
- * Version ID format (matches official Fabric Installer):
- *   fabric-loader-<loaderVersion>-<mcVersion>
- */
 public class FabricInstaller {
-
     private static final String FABRIC_META   = "https://meta.fabricmc.net/v2";
     private static final String FABRIC_MAVEN  = "https://maven.fabricmc.net/";
 
@@ -27,26 +17,12 @@ public class FabricInstaller {
         void onProgress(String message, int percent);
     }
 
-    // -------------------------------------------------------------------------
-    // Public API
-    // -------------------------------------------------------------------------
-
-    /**
-     * Returns stable Fabric loader version strings, newest first.
-     *
-     * The Fabric meta API returns objects like:
-     *   { "separator": ".", "build": 14, "maven": "net.fabricmc:fabric-loader:0.16.14",
-     *     "version": "0.16.14", "stable": true }
-     * So "version" is a plain string field – NOT a nested object.
-     */
     public static List<String> fetchLoaderVersions() throws Exception {
         JsonArray arr = fetchArray(FABRIC_META + "/versions/loader");
         List<String> stable = new ArrayList<>();
         List<String> all    = new ArrayList<>();
-
         for (JsonElement el : arr) {
             JsonObject obj = el.getAsJsonObject();
-            // "version" is a STRING on this endpoint
             String ver = obj.get("version").getAsString();
             all.add(ver);
             if (obj.has("stable") && obj.get("stable").getAsBoolean())
@@ -55,19 +31,16 @@ public class FabricInstaller {
         return stable.isEmpty() ? all : stable;
     }
 
-    /** Returns the latest stable loader version string. */
     public static String fetchLatestLoaderVersion() throws Exception {
         List<String> vers = fetchLoaderVersions();
         if (vers.isEmpty()) throw new IOException("No Fabric loader versions found");
         return vers.get(0);
     }
 
-    /** Installs Fabric using the latest stable loader for the given MC version. */
     public static String installFabric(String mcVersion, ProgressCallback cb) throws Exception {
         return installFabric(mcVersion, fetchLatestLoaderVersion(), cb);
     }
 
-    /** Installs Fabric using a specific loader version. */
     public static String installFabric(String mcVersion, String loaderVersion,
                                        ProgressCallback cb) throws Exception {
         String mcDir = AppConfig.getMinecraftDir();
@@ -78,7 +51,6 @@ public class FabricInstaller {
             + "/" + loaderVersion + "/profile/json";
         JsonObject profile = fetchObject(profileUrl);
 
-        // 1) Save profile JSON
         File vDir = new File(mcDir, "versions/" + fabricId);
         vDir.mkdirs();
         try (FileWriter fw = new FileWriter(new File(vDir, fabricId + ".json"))) {
@@ -86,7 +58,6 @@ public class FabricInstaller {
         }
         cb.onProgress("Profile JSON saved", 15);
 
-        // 2) Download libraries
         if (profile.has("libraries")) {
             JsonArray libs = profile.getAsJsonArray("libraries");
             int total = libs.size(), idx = 0;
@@ -94,39 +65,25 @@ public class FabricInstaller {
                 idx++;
                 JsonObject lib = el.getAsJsonObject();
                 int pct = 15 + idx * 80 / total;
-
                 if (!lib.has("name")) continue;
                 String name   = lib.get("name").getAsString();
                 String base   = lib.has("url") ? lib.get("url").getAsString() : FABRIC_MAVEN;
                 String relPath = mavenToPath(name);
                 if (relPath == null) continue;
-
                 File dest = new File(mcDir, "libraries/" + relPath);
-                if (dest.exists() && dest.length() > 0) continue; // already present
-
+                if (dest.exists() && dest.length() > 0) continue;
                 dest.getParentFile().mkdirs();
                 cb.onProgress("Downloading: " + dest.getName(), pct);
-
                 String dlUrl = (base.endsWith("/") ? base : base + "/") + relPath;
                 if (!tryDownload(dlUrl, dest)) {
-                    // fallback to Fabric maven
                     tryDownload(FABRIC_MAVEN + relPath, dest);
                 }
             }
         }
-
         cb.onProgress("Fabric " + loaderVersion + " ready!", 100);
         return fabricId;
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
-    /** Maven coordinates → relative repo path.
-     *  e.g. net.fabricmc:fabric-loader:0.16.14
-     *       → net/fabricmc/fabric-loader/0.16.14/fabric-loader-0.16.14.jar
-     */
     public static String mavenToPath(String coord) {
         String[] p = coord.split(":");
         if (p.length < 3) return null;
