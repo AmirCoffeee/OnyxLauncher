@@ -52,6 +52,10 @@ public class OnyxLauncher extends Application {
 
     private Button profileBtn;
     private Button usernameBtn;
+    // ── hero banner labels (updated when active profile changes) ─────────────
+    private Label  heroBadgeLbl;
+    private Label  heroNameLbl;
+    private Label  heroVerLbl;
 
     private TabPane          installTabPane;
     private ComboBox<String> installMcCombo;
@@ -392,8 +396,8 @@ public class OnyxLauncher extends Application {
         );
 
 
-        Label profileBadge = new Label("● CURRENT PROFILE");
-        profileBadge.setStyle(
+        heroBadgeLbl = new Label("● CURRENT PROFILE");
+        heroBadgeLbl.setStyle(
             "-fx-text-fill:" + activeProfile.getColor() + ";" +
             "-fx-font-size:10px;-fx-font-weight:bold;" +
             "-fx-font-family:'Ubuntu';" +
@@ -401,8 +405,8 @@ public class OnyxLauncher extends Application {
             "-fx-padding:3 10;-fx-background-radius:4;"
         );
 
-        Label profileNameLbl = new Label(activeProfile.getName());
-        profileNameLbl.setStyle(
+        heroNameLbl = new Label(activeProfile.getName());
+        heroNameLbl.setStyle(
             "-fx-text-fill:#ffffff;" +
             "-fx-font-size:26px;" +
             "-fx-font-weight:bold;" +
@@ -415,14 +419,14 @@ public class OnyxLauncher extends Application {
                       : rawVer.contains("forge") ? "Forge" : "Vanilla";
         String vShort = rawVer.startsWith("fabric-loader")
                       ? rawVer.replaceAll("^fabric-loader-[^-]+-","") : rawVer;
-        Label profileVerLbl = new Label(vType + (vShort.isEmpty() ? "" : "  •  " + vShort));
-        profileVerLbl.setStyle(
+        heroVerLbl = new Label(vType + (vShort.isEmpty() ? "" : "  •  " + vShort));
+        heroVerLbl.setStyle(
             "-fx-text-fill:#aaaaaa;" +
             "-fx-font-size:13px;" +
             "-fx-font-family:'Ubuntu';"
         );
 
-        VBox leftInfo = new VBox(5, profileBadge, profileNameLbl, profileVerLbl);
+        VBox leftInfo = new VBox(5, heroBadgeLbl, heroNameLbl, heroVerLbl);
         leftInfo.setAlignment(Pos.CENTER_LEFT);
 
         profileBtn = btn(activeProfile.getName() + "  ▾","btn","btn-profile");
@@ -523,6 +527,7 @@ public class OnyxLauncher extends Application {
     private void refreshMainHero() { }
 
     private void refreshProfileBtn() {
+        // update profile switcher button
         profileBtn.setText(activeProfile.getName() + "  ▾");
         profileBtn.setStyle(
             "-fx-background-color:" + activeProfile.getColor() + ";" +
@@ -534,6 +539,28 @@ public class OnyxLauncher extends Application {
             "-fx-pref-height:44;" +
             "-fx-padding:0 18;"
         );
+
+        // update hero banner labels
+        if (heroBadgeLbl != null) {
+            heroBadgeLbl.setStyle(
+                "-fx-text-fill:" + activeProfile.getColor() + ";" +
+                "-fx-font-size:10px;-fx-font-weight:bold;" +
+                "-fx-font-family:'Ubuntu';" +
+                "-fx-background-color:" + activeProfile.getColor() + "33;" +
+                "-fx-padding:3 10;-fx-background-radius:4;"
+            );
+        }
+        if (heroNameLbl != null) {
+            heroNameLbl.setText(activeProfile.getName());
+        }
+        if (heroVerLbl != null) {
+            String rv = activeProfile.getVersion();
+            String vt = rv.startsWith("fabric-loader") ? "Fabric"
+                      : rv.contains("forge") ? "Forge" : "Vanilla";
+            String vs = rv.startsWith("fabric-loader")
+                      ? rv.replaceAll("^fabric-loader-[^-]+-","") : rv;
+            heroVerLbl.setText(vt + (vs.isEmpty() ? "" : "  •  " + vs));
+        }
     }
 
 
