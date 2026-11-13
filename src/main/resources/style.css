@@ -473,22 +473,39 @@
 
 /* ── Overlay / modal backdrop ────────────────────────────── */
 .overlay-backdrop {
-    -fx-background-color: rgba(0,0,0,0.75);
+    -fx-background-color: rgba(0,0,0,0.80);
 }
 .overlay-dialog {
-    -fx-background-color: #1a1a1a;
-    -fx-background-radius: 12;
-    -fx-border-color: #2a2a2a;
-    -fx-border-radius: 12;
-    -fx-border-width: 1;
-    -fx-padding: 32;
-    -fx-effect: dropshadow(gaussian, black, 30, 0.6, 0, 8);
-    -fx-max-width: 340;
+    -fx-background-color: #16161a;
+    -fx-background-radius: 16;
+    -fx-border-color: #2c2c36;
+    -fx-border-radius: 16;
+    -fx-border-width: 1.5;
+    -fx-padding: 28 32;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.85), 35, 0.5, 0, 10);
+    -fx-max-width: 390;
 }
 .overlay-dialog .dialog-title {
     -fx-text-fill: white;
     -fx-font-size: 20px;
     -fx-font-weight: bold;
+}
+.btn-back {
+    -fx-background-color: #222228;
+    -fx-text-fill: #b0b0bb;
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+    -fx-background-radius: 8;
+    -fx-border-color: #2e2e38;
+    -fx-border-radius: 8;
+    -fx-border-width: 1;
+    -fx-cursor: hand;
+    -fx-pref-height: 38;
+}
+.btn-back:hover {
+    -fx-background-color: #2d2d35;
+    -fx-text-fill: #ffffff;
+    -fx-border-color: #3e3e4a;
 }
 
 /* ── Settings / form sections ────────────────────────────── */

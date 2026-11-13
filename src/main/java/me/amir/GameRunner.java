@@ -42,7 +42,7 @@ public class GameRunner {
         String javaPath = getJavaPath(javaVer);
         Settings s      = Settings.load();
         return launch(username, version, ramMB, extraArgs, mcDir,
-                s.isFullscreen(), s.getResWidth(), s.getResHeight(), javaPath, "auto");
+                s.isFullscreen(), s.getResWidth(), s.getResHeight(), javaPath, s.getGpuMode());
     }
 
     private static Process launch(String username, String version, int ramMB,
@@ -188,18 +188,30 @@ public class GameRunner {
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.directory(new File(mcDir));
         pb.redirectErrorStream(true);
-        if (isLinux) {
+        boolean isWindows = os.contains("win");
+        String gm = (gpuMode == null) ? "auto" : gpuMode.toLowerCase();
+        boolean forceDgpu = gm.startsWith("dgpu")
+                || (!gm.startsWith("igpu") && !gm.equals("auto")
+                && (gm.contains("nvidia") || gm.contains("rtx") || gm.contains("gtx")
+                || (gm.contains("radeon") && !gm.contains("intel")) || gm.contains("arc")));
+        boolean forceIgpu = gm.startsWith("igpu")
+                || (!forceDgpu && (gm.contains("intel") || gm.contains("integrated")));
+
+        if (isWindows) {
+            int preference = forceIgpu ? 1 : 2; // 1 = Power saving (iGPU), 2 = High performance (dGPU)
+            applyWindowsGpuPreference(javaPath, preference);
+
+            if (forceDgpu) {
+                pb.environment().put("SHIM_MCCOMPAT", "0x800000001");
+                System.out.println("[GameRunner] Windows GPU mode: High Performance (dGPU) [" + gpuMode + "]");
+            } else {
+                pb.environment().remove("SHIM_MCCOMPAT");
+                System.out.println("[GameRunner] Windows GPU mode: Power Saving (iGPU) [" + gpuMode + "]");
+            }
+        } else if (isLinux) {
             pb.environment().put("_JAVA_AWT_WM_NONREPARENTING", "1");
             pb.environment().put("GDK_BACKEND", "x11");
             pb.environment().put("XLIB_SKIP_ARGB_VISUALS", "1");
-
-            String gm = (gpuMode == null) ? "auto" : gpuMode.toLowerCase();
-            boolean forceDgpu = gm.startsWith("dgpu")
-                    || (!gm.startsWith("igpu") && !gm.equals("auto")
-                    && (gm.contains("nvidia") || gm.contains("rtx") || gm.contains("gtx")
-                    || (gm.contains("radeon") && !gm.contains("intel"))));
-            boolean forceIgpu = gm.startsWith("igpu")
-                    || (!forceDgpu && (gm.contains("intel") || gm.contains("integrated")));
 
             if (forceIgpu) {
                 pb.environment().put("DRI_PRIME", "0");
@@ -207,14 +219,22 @@ public class GameRunner {
                 pb.environment().remove("__NV_PRIME_RENDER_OFFLOAD_PROVIDER");
                 pb.environment().remove("__GLX_VENDOR_LIBRARY_NAME");
                 pb.environment().remove("__VK_LAYER_NV_optimus");
-                System.out.println("[GameRunner] GPU mode: iGPU (Integrated)");
+                System.out.println("[GameRunner] Linux GPU mode: iGPU (Integrated) [" + gpuMode + "]");
             } else {
-                pb.environment().put("__NV_PRIME_RENDER_OFFLOAD", "1");
-                pb.environment().put("__NV_PRIME_RENDER_OFFLOAD_PROVIDER", "NVIDIA-G0");
-                pb.environment().put("__GLX_VENDOR_LIBRARY_NAME", "nvidia");
-                pb.environment().put("__VK_LAYER_NV_optimus", "NVIDIA_only");
                 pb.environment().put("DRI_PRIME", "1");
-                System.out.println("[GameRunner] GPU mode: dGPU (NVIDIA PRIME offload)  [" + gpuMode + "]");
+                boolean isNvidia = gm.contains("nvidia") || gm.contains("geforce") || gm.contains("rtx") || gm.contains("gtx");
+                if (isNvidia || (!gm.contains("amd") && !gm.contains("radeon"))) {
+                    pb.environment().put("__NV_PRIME_RENDER_OFFLOAD", "1");
+                    pb.environment().put("__NV_PRIME_RENDER_OFFLOAD_PROVIDER", "NVIDIA-G0");
+                    pb.environment().put("__GLX_VENDOR_LIBRARY_NAME", "nvidia");
+                    pb.environment().put("__VK_LAYER_NV_optimus", "NVIDIA_only");
+                } else {
+                    pb.environment().remove("__NV_PRIME_RENDER_OFFLOAD");
+                    pb.environment().remove("__NV_PRIME_RENDER_OFFLOAD_PROVIDER");
+                    pb.environment().remove("__GLX_VENDOR_LIBRARY_NAME");
+                    pb.environment().remove("__VK_LAYER_NV_optimus");
+                }
+                System.out.println("[GameRunner] Linux GPU mode: dGPU [" + gpuMode + "]");
             }
         }
         return pb.start();
@@ -346,29 +366,133 @@ public class GameRunner {
     }
 
     public static List<String> detectGpus() {
+        List<String> rawNames = new ArrayList<>();
+        String os = System.getProperty("os.name").toLowerCase();
+
+        if (os.contains("win")) {
+            rawNames.addAll(detectGpusWindows());
+        } else if (os.contains("nix") || os.contains("nux")) {
+            rawNames.addAll(detectGpusLinux());
+        } else if (os.contains("mac") || os.contains("darwin")) {
+            rawNames.addAll(detectGpusMac());
+        }
+
         List<String> gpus = new ArrayList<>();
-        try {
-            Process p = new ProcessBuilder("lspci").redirectErrorStream(true).start();
-            new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()))
-                    .lines().forEach(line -> {
-                        String l = line.toLowerCase();
-                        if (!l.contains("vga") && !l.contains("3d controller") && !l.contains("display controller")) return;
-                        String desc = line.contains(":") ? line.substring(line.indexOf(':') + 1).trim() : line;
-                        if (desc.contains(": ")) desc = desc.substring(desc.indexOf(": ") + 2).trim();
-                        String lower = desc.toLowerCase();
-                        if (lower.contains("nvidia")) {
-                            gpus.add("dgpu|" + desc);
-                        } else if (lower.contains("intel") || lower.contains("integrated") || lower.contains("uhd") || lower.contains("iris")) {
-                            gpus.add("igpu|" + desc);
-                        } else if (lower.contains("amd") || lower.contains("radeon")) {
-                            gpus.add("dgpu|" + desc);
-                        } else {
-                            gpus.add("igpu|" + desc);
-                        }
-                    });
-        } catch (Exception ignored) {}
+        for (String name : rawNames) {
+            String type = classifyGpu(name);
+            String entry = type + "|" + name;
+            if (!gpus.contains(entry)) {
+                gpus.add(entry);
+            }
+        }
+
+        // Sort so that igpu comes first, then dgpu
+        gpus.sort((a, b) -> {
+            boolean aIsI = a.startsWith("igpu|");
+            boolean bIsI = b.startsWith("igpu|");
+            if (aIsI && !bIsI) return -1;
+            if (!aIsI && bIsI) return 1;
+            return a.compareTo(b);
+        });
 
         if (gpus.isEmpty()) {
+            gpus.add("igpu|Integrated GPU (Intel/AMD)");
+            gpus.add("dgpu|Discrete GPU (NVIDIA/AMD)");
+        }
+
+        return gpus;
+    }
+
+    private static List<String> detectGpusWindows() {
+        List<String> detected = new ArrayList<>();
+        // 1. Query registry (very fast and comprehensive for all installed graphics adapters)
+        try {
+            Process p = new ProcessBuilder("reg", "query",
+                    "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}",
+                    "/s", "/v", "DriverDesc").redirectErrorStream(true).start();
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    line = line.trim();
+                    if (line.contains("DriverDesc") && line.contains("REG_SZ")) {
+                        String[] parts = line.split("REG_SZ", 2);
+                        if (parts.length > 1) {
+                            String name = parts[1].trim();
+                            if (!name.isEmpty() && !isIgnoredGpu(name) && !detected.contains(name)) {
+                                detected.add(name);
+                            }
+                        }
+                    }
+                }
+            }
+            p.waitFor();
+        } catch (Exception ignored) {}
+
+        // 2. Fallback to PowerShell CIM if registry gave no results
+        if (detected.isEmpty()) {
+            try {
+                Process p = new ProcessBuilder("powershell", "-NoProfile", "-NonInteractive", "-Command",
+                        "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name")
+                        .redirectErrorStream(true).start();
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        String name = line.trim();
+                        if (!name.isEmpty() && !isIgnoredGpu(name) && !detected.contains(name)) {
+                            detected.add(name);
+                        }
+                    }
+                }
+                p.waitFor();
+            } catch (Exception ignored) {}
+        }
+
+        // 3. Fallback to WMIC
+        if (detected.isEmpty()) {
+            try {
+                Process p = new ProcessBuilder("wmic", "path", "win32_VideoController", "get", "name")
+                        .redirectErrorStream(true).start();
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        String name = line.trim();
+                        if (!name.isEmpty() && !name.equalsIgnoreCase("name") && !isIgnoredGpu(name) && !detected.contains(name)) {
+                            detected.add(name);
+                        }
+                    }
+                }
+                p.waitFor();
+            } catch (Exception ignored) {}
+        }
+
+        return detected;
+    }
+
+    private static List<String> detectGpusLinux() {
+        List<String> detected = new ArrayList<>();
+        String[] lspciCmds = {"lspci", "/usr/bin/lspci", "/usr/sbin/lspci", "/sbin/lspci"};
+        for (String cmd : lspciCmds) {
+            try {
+                Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        String l = line.toLowerCase();
+                        if (!l.contains("vga") && !l.contains("3d controller") && !l.contains("display controller")) continue;
+                        String desc = line.contains(":") ? line.substring(line.indexOf(':') + 1).trim() : line;
+                        if (desc.contains(": ")) desc = desc.substring(desc.indexOf(": ") + 2).trim();
+                        String clean = cleanLinuxGpuName(desc);
+                        if (!clean.isEmpty() && !isIgnoredGpu(clean) && !detected.contains(clean)) {
+                            detected.add(clean);
+                        }
+                    }
+                }
+                p.waitFor();
+                if (!detected.isEmpty()) break;
+            } catch (Exception ignored) {}
+        }
+
+        if (detected.isEmpty()) {
             File drm = new File("/sys/class/drm");
             if (drm.isDirectory()) {
                 File[] cards = drm.listFiles(f -> f.getName().matches("card\\d+"));
@@ -379,9 +503,9 @@ public class GameRunner {
                         if (label.exists()) {
                             try {
                                 String name = new String(java.nio.file.Files.readAllBytes(label.toPath())).trim();
-                                String lower = name.toLowerCase();
-                                if (lower.contains("nvidia")) gpus.add("dgpu|" + name);
-                                else                          gpus.add("igpu|" + name);
+                                if (!name.isEmpty() && !isIgnoredGpu(name) && !detected.contains(name)) {
+                                    detected.add(name);
+                                }
                             } catch (Exception ignored) {}
                         }
                     }
@@ -389,12 +513,195 @@ public class GameRunner {
             }
         }
 
-        boolean hasIgpu = gpus.stream().anyMatch(g -> g.startsWith("igpu|"));
-        boolean hasDgpu = gpus.stream().anyMatch(g -> g.startsWith("dgpu|"));
-        if (!hasIgpu) gpus.add(0, "igpu|Integrated GPU (Intel/AMD)");
-        if (!hasDgpu) gpus.add("dgpu|Discrete GPU (NVIDIA/AMD)");
+        if (detected.isEmpty()) {
+            try {
+                Process p = new ProcessBuilder("glxinfo", "-B").redirectErrorStream(true).start();
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        if (line.contains("OpenGL renderer string:")) {
+                            String name = line.substring(line.indexOf(':') + 1).trim();
+                            if (!name.isEmpty() && !isIgnoredGpu(name) && !detected.contains(name)) {
+                                detected.add(name);
+                            }
+                        }
+                    }
+                }
+                p.waitFor();
+            } catch (Exception ignored) {}
+        }
 
-        return gpus;
+        return detected;
+    }
+
+    private static String cleanLinuxGpuName(String desc) {
+        if (desc.contains("[") && desc.contains("]")) {
+            int start = desc.indexOf('[');
+            int end = desc.lastIndexOf(']');
+            if (end > start) {
+                String inside = desc.substring(start + 1, end).trim();
+                if (inside.contains("/")) {
+                    inside = inside.split("/")[0].trim();
+                }
+                if (!inside.isEmpty() && !inside.toLowerCase().startsWith("amd/ati")) {
+                    String vendor = "";
+                    String lowerDesc = desc.toLowerCase();
+                    if (lowerDesc.contains("nvidia") && !inside.toLowerCase().contains("nvidia")) vendor = "NVIDIA ";
+                    else if (lowerDesc.contains("intel") && !inside.toLowerCase().contains("intel")) vendor = "Intel ";
+                    else if (lowerDesc.contains("amd") && !inside.toLowerCase().contains("amd") && !inside.toLowerCase().contains("radeon")) vendor = "AMD ";
+                    return vendor + inside;
+                }
+            }
+        }
+        return desc;
+    }
+
+    private static List<String> detectGpusMac() {
+        List<String> detected = new ArrayList<>();
+        try {
+            Process p = new ProcessBuilder("system_profiler", "SPDisplaysDataType").redirectErrorStream(true).start();
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    line = line.trim();
+                    if (line.startsWith("Chipset Model:")) {
+                        String name = line.substring("Chipset Model:".length()).trim();
+                        if (!name.isEmpty() && !detected.contains(name)) {
+                            detected.add(name);
+                        }
+                    }
+                }
+            }
+            p.waitFor();
+        } catch (Exception ignored) {}
+        return detected;
+    }
+
+    private static boolean isIgnoredGpu(String name) {
+        String l = name.toLowerCase();
+        return l.contains("citrix")
+                || l.contains("virtualbox")
+                || l.contains("vmware")
+                || l.contains("spacedesk")
+                || l.contains("parsec")
+                || l.contains("iddsampledriver")
+                || l.contains("remote display")
+                || l.contains("mirage driver");
+    }
+
+    private static String classifyGpu(String name) {
+        String l = name.toLowerCase();
+        // NVIDIA is always discrete GPU
+        if (l.contains("nvidia") || l.contains("geforce") || l.contains("rtx") || l.contains("gtx")
+                || l.contains("quadro") || l.contains("titan")) {
+            return "dgpu";
+        }
+        // Intel Arc / Iris Xe MAX are discrete GPUs
+        if (l.contains("arc") || l.contains("iris xe max") || l.contains("dg1") || l.contains("dg2")
+                || l.contains("battlemage") || l.contains("alchemist")) {
+            return "dgpu";
+        }
+        // Integrated Intel
+        if (l.contains("intel") || l.contains("uhd") || l.contains("hd graphics") || l.contains("iris")) {
+            return "igpu";
+        }
+        // Integrated AMD (APUs)
+        if (l.contains("radeon(tm) graphics") || l.contains("radeon graphics") || l.contains("vega")
+                || l.contains("integrated") || l.contains("apu") || l.contains("picasso") || l.contains("raven")
+                || l.contains("renoir") || l.contains("lucienne") || l.contains("cezanne") || l.contains("barcelo")
+                || l.contains("rembrandt") || l.contains("phoenix") || l.contains("hawk point") || l.contains("strix")
+                || l.contains("680m") || l.contains("780m") || l.contains("760m") || l.contains("660m")
+                || l.contains("610m") || l.contains("740m")) {
+            return "igpu";
+        }
+        // Discrete AMD (Radeon RX, R9, R7, HD series, Pro)
+        if (l.contains("radeon rx") || l.contains("rx ") || l.contains("rx-") || l.contains("radeon pro")
+                || l.contains("firepro") || l.contains("r9 ") || l.contains("r7 ") || l.contains("hd 7") || l.contains("hd 8")) {
+            return "dgpu";
+        }
+        if (l.contains("amd") || l.contains("radeon")) {
+            return "dgpu";
+        }
+        return "dgpu";
+    }
+
+    public static void applyWindowsGpuPreference(String javaPath, int preference) {
+        if (!System.getProperty("os.name").toLowerCase().contains("win")) return;
+        try {
+            Set<String> pathsToRegister = new LinkedHashSet<>();
+            if (javaPath != null && !javaPath.isBlank()) {
+                File jf = new File(javaPath);
+                if (jf.isAbsolute() && jf.exists()) {
+                    pathsToRegister.add(jf.getAbsolutePath());
+                    File parent = jf.getParentFile();
+                    if (parent != null) {
+                        File alt = new File(parent, jf.getName().equalsIgnoreCase("java.exe") ? "javaw.exe" : "java.exe");
+                        if (alt.exists()) pathsToRegister.add(alt.getAbsolutePath());
+                    }
+                } else {
+                    try {
+                        Process p = new ProcessBuilder("where", javaPath).redirectErrorStream(true).start();
+                        try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                            String line;
+                            while ((line = br.readLine()) != null) {
+                                line = line.trim();
+                                File f = new File(line);
+                                if (f.exists()) {
+                                    pathsToRegister.add(f.getAbsolutePath());
+                                    File parent = f.getParentFile();
+                                    if (parent != null) {
+                                        File alt = new File(parent, f.getName().equalsIgnoreCase("java.exe") ? "javaw.exe" : "java.exe");
+                                        if (alt.exists()) pathsToRegister.add(alt.getAbsolutePath());
+                                    }
+                                }
+                            }
+                        }
+                        p.waitFor();
+                    } catch (Exception ignored) {}
+                }
+            }
+
+            // Current Java runtime
+            String javaHome = System.getProperty("java.home");
+            if (javaHome != null) {
+                File j1 = new File(javaHome, "bin/javaw.exe");
+                File j2 = new File(javaHome, "bin/java.exe");
+                if (j1.exists()) pathsToRegister.add(j1.getAbsolutePath());
+                if (j2.exists()) pathsToRegister.add(j2.getAbsolutePath());
+            }
+
+            // Also check .minecraft/runtime directory if present
+            try {
+                File runtimeDir = new File(AppConfig.getMinecraftDir(), "runtime");
+                if (runtimeDir.isDirectory()) {
+                    collectJavaExes(runtimeDir, pathsToRegister);
+                }
+            } catch (Exception ignored) {}
+
+            for (String p : pathsToRegister) {
+                new ProcessBuilder("reg", "add",
+                        "HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences",
+                        "/v", p,
+                        "/t", "REG_SZ",
+                        "/d", "GpuPreference=" + preference + ";",
+                        "/f"
+                ).redirectErrorStream(true).start().waitFor();
+            }
+        } catch (Exception e) {
+            System.err.println("[GameRunner] Failed to apply Windows GPU preference: " + e.getMessage());
+        }
+    }
+
+    private static void collectJavaExes(File dir, Set<String> out) {
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        for (File f : files) {
+            if (f.isDirectory()) {
+                collectJavaExes(f, out);
+            } else if (f.getName().equalsIgnoreCase("javaw.exe") || f.getName().equalsIgnoreCase("java.exe")) {
+                out.add(f.getAbsolutePath());
+            }
+        }
     }
 
     public static int getRequiredJavaVersion(String mcDir, String globalDir, String version) {

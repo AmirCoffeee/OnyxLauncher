@@ -15,6 +15,7 @@ import javafx.scene.image.Image;
 import javafx.scene.layout.*;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
+import javafx.scene.shape.SVGPath;
 import javafx.util.Duration;
 import javax.imageio.ImageIO;
 import java.awt.MenuItem;
@@ -514,7 +515,10 @@ public class OnyxLauncher extends Application {
 
         playBtn.setOnAction(e -> {
             String user = settings.getUsername();
-            if (user.isEmpty()) { alert("No account", "Select an account first."); return; }
+            if (user == null || user.trim().isEmpty()) {
+                showNoAccountDialog();
+                return;
+            }
             if (activeProfile.getVersion().isEmpty()) { alert("No version", "Edit the profile and set a Minecraft version."); return; }
             playBtn.setText("LAUNCHING…"); playBtn.setDisable(true);
             new Thread(() -> { try {
@@ -754,6 +758,137 @@ public class OnyxLauncher extends Application {
         setSlot(slotOverlay, backdrop);
     }
 
+    private void showNoAccountDialog() {
+        if (!Platform.isFxApplicationThread()) {
+            Platform.runLater(this::showNoAccountDialog);
+            return;
+        }
+        if (slotOverlay.getChildren().isEmpty()) return;
+        VBox backdrop = (VBox) slotOverlay.getChildren().get(0);
+        backdrop.getChildren().clear();
+
+        VBox dlg = new VBox(18);
+        dlg.getStyleClass().add("overlay-dialog");
+        dlg.setAlignment(Pos.CENTER);
+        dlg.setMaxWidth(390);
+
+        // Warning Icon Badge
+        StackPane iconBadge = new StackPane();
+        iconBadge.setPrefSize(56, 56);
+        iconBadge.setMaxSize(56, 56);
+        iconBadge.setStyle(
+            "-fx-background-color: #2b1818;" +
+            "-fx-background-radius: 28;" +
+            "-fx-border-color: #552424;" +
+            "-fx-border-radius: 28;" +
+            "-fx-border-width: 1.5;"
+        );
+
+        SVGPath userIcon = new SVGPath();
+        userIcon.setContent("M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z");
+        userIcon.setStyle("-fx-fill: #ff5555;");
+        userIcon.setScaleX(1.3);
+        userIcon.setScaleY(1.3);
+        iconBadge.getChildren().add(userIcon);
+
+        Label titleLbl = new Label("No Account Selected");
+        titleLbl.setStyle("-fx-text-fill: white; -fx-font-size: 19px; -fx-font-weight: bold;");
+
+        Label msgLbl = new Label("Please select an existing account or add a new one to launch Minecraft.");
+        msgLbl.setStyle("-fx-text-fill: #9a9aa5; -fx-font-size: 13px; -fx-text-alignment: center; -fx-line-spacing: 2px;");
+        msgLbl.setWrapText(true);
+        msgLbl.setMaxWidth(320);
+
+        VBox headerBox = new VBox(10, iconBadge, titleLbl, msgLbl);
+        headerBox.setAlignment(Pos.CENTER);
+
+        VBox actionsBox = new VBox(10);
+        actionsBox.setAlignment(Pos.CENTER);
+        actionsBox.setMaxWidth(Double.MAX_VALUE);
+
+        List<String> history = settings.getUsernameHistory();
+        if (history != null && !history.isEmpty()) {
+            VBox accBox = new VBox(6);
+            accBox.setAlignment(Pos.CENTER);
+            accBox.setMaxWidth(Double.MAX_VALUE);
+
+            Label quickLbl = new Label("Quick select existing account:");
+            quickLbl.setStyle("-fx-text-fill: #777785; -fx-font-size: 11px; -fx-font-weight: bold;");
+            accBox.getChildren().add(quickLbl);
+
+            int count = 0;
+            for (String acc : history) {
+                if (count >= 3) break;
+                count++;
+                Button accBtn = new Button("👤  " + acc);
+                accBtn.setMaxWidth(Double.MAX_VALUE);
+                accBtn.setPrefHeight(34);
+                accBtn.setStyle(
+                    "-fx-background-color: #222228;" +
+                    "-fx-text-fill: #e0e0e0;" +
+                    "-fx-font-size: 12px;" +
+                    "-fx-font-weight: bold;" +
+                    "-fx-background-radius: 8;" +
+                    "-fx-border-color: #2e2e38;" +
+                    "-fx-border-radius: 8;" +
+                    "-fx-cursor: hand;" +
+                    "-fx-alignment: center-left;" +
+                    "-fx-padding: 0 14;"
+                );
+                accBtn.setOnMouseEntered(ev -> accBtn.setStyle(
+                    "-fx-background-color: #2b2b34;" +
+                    "-fx-text-fill: #1db954;" +
+                    "-fx-font-size: 12px;" +
+                    "-fx-font-weight: bold;" +
+                    "-fx-background-radius: 8;" +
+                    "-fx-border-color: #1db954;" +
+                    "-fx-border-radius: 8;" +
+                    "-fx-cursor: hand;" +
+                    "-fx-alignment: center-left;" +
+                    "-fx-padding: 0 14;"
+                ));
+                accBtn.setOnMouseExited(ev -> accBtn.setStyle(
+                    "-fx-background-color: #222228;" +
+                    "-fx-text-fill: #e0e0e0;" +
+                    "-fx-font-size: 12px;" +
+                    "-fx-font-weight: bold;" +
+                    "-fx-background-radius: 8;" +
+                    "-fx-border-color: #2e2e38;" +
+                    "-fx-border-radius: 8;" +
+                    "-fx-cursor: hand;" +
+                    "-fx-alignment: center-left;" +
+                    "-fx-padding: 0 14;"
+                ));
+                accBtn.setOnAction(ev -> {
+                    settings.setUsername(acc);
+                    settings.save();
+                    refreshAccountCard();
+                    refreshAccountPopup();
+                    slotOverlay.setVisible(false);
+                });
+                accBox.getChildren().add(accBtn);
+            }
+            actionsBox.getChildren().add(accBox);
+        }
+
+        Button addAccBtn = btn("+ Add New Account", "btn", "btn-primary");
+        addAccBtn.setMaxWidth(Double.MAX_VALUE);
+        addAccBtn.setPrefHeight(40);
+        hover(addAccBtn);
+        addAccBtn.setOnAction(ev -> openAddAccount());
+
+        Button backBtn = btn("Back", "btn", "btn-back");
+        backBtn.setMaxWidth(Double.MAX_VALUE);
+        hover(backBtn);
+        backBtn.setOnAction(ev -> slotOverlay.setVisible(false));
+
+        actionsBox.getChildren().addAll(addAccBtn, backBtn);
+
+        dlg.getChildren().addAll(headerBox, actionsBox);
+        backdrop.getChildren().add(dlg);
+        slotOverlay.setVisible(true);
+    }
+
     private void openAddAccount() {
         VBox backdrop = (VBox) slotOverlay.getChildren().get(0);
         backdrop.getChildren().clear();
@@ -761,11 +896,13 @@ public class OnyxLauncher extends Application {
         VBox dlg = new VBox(16);
         dlg.getStyleClass().add("overlay-dialog");
         dlg.setAlignment(Pos.CENTER);
+        dlg.setMaxWidth(380);
 
         Label title=new Label("Add Account"); title.getStyleClass().add("dialog-title");
         TextField field=new TextField(); field.setPromptText("Username");
+        field.setPrefHeight(40);
         Button ok=btn("Add Account","btn","btn-primary"); ok.setMaxWidth(Double.MAX_VALUE); ok.setPrefHeight(40);
-        Button cancel=btn("Cancel","btn","btn-dark");     cancel.setMaxWidth(Double.MAX_VALUE);
+        Button cancel=btn("Back","btn","btn-back");       cancel.setMaxWidth(Double.MAX_VALUE);
         hover(ok); hover(cancel);
 
         ok.setOnAction(ev->{
@@ -782,6 +919,7 @@ public class OnyxLauncher extends Application {
         dlg.getChildren().addAll(title,field,ok,cancel);
         backdrop.getChildren().add(dlg);
         slotOverlay.setVisible(true);
+        Platform.runLater(field::requestFocus);
     }
 
 
@@ -849,7 +987,7 @@ public class OnyxLauncher extends Application {
             Label nameLbl = new Label(gpuName);
             nameLbl.setStyle("-fx-text-fill:#efefef;-fx-font-size:13px;-fx-font-weight:bold;");
             nameLbl.setWrapText(true);
-            nameLbl.setMaxWidth(220);
+            nameLbl.setMaxWidth(260);
 
             Label typeLbl = new Label(typeLabel);
             typeLbl.setStyle(
@@ -863,8 +1001,8 @@ public class OnyxLauncher extends Application {
             inner.setAlignment(Pos.CENTER_LEFT);
             inner.setMouseTransparent(true);
             tb.setGraphic(inner);
-            tb.setMinWidth(220);
-            tb.setPrefHeight(68);
+            tb.setMinWidth(240);
+            tb.setMinHeight(70);
 
             boolean hasDgpu = rawGpus.stream().anyMatch(g -> g.startsWith("dgpu|"));
             boolean sel;
@@ -894,9 +1032,11 @@ public class OnyxLauncher extends Application {
             tb.selectedProperty().addListener((obs, was, now) -> {
                 for (ToggleButton b : gpuBtns) {
                     boolean s  = b.isSelected();
-                    String  ba = s ? (((String) b.getUserData()).startsWith("dgpu") ? "#1db954" : "#2196F3") : "#2a2a2a";
+                    boolean isD = ((String) b.getUserData()).startsWith("dgpu");
+                    String  ba = s ? (isD ? "#1db954" : "#2196F3") : "#2a2a2a";
+                    String  bg = s ? (isD ? "#0e2018" : "#0d1b2a") : "#191919";
                     b.setStyle(
-                        "-fx-background-color:" + (s ? "#0e2018" : "#191919") + ";" +
+                        "-fx-background-color:" + bg + ";" +
                         "-fx-border-color:" + ba + ";" +
                         "-fx-border-width:2;-fx-border-radius:8;" +
                         "-fx-background-radius:8;-fx-padding:12 18;"
@@ -908,11 +1048,17 @@ public class OnyxLauncher extends Application {
             gpuCards.getChildren().add(tb);
         }
 
+        if (gpuGroup.getSelectedToggle() == null && !gpuBtns.isEmpty()) {
+            gpuBtns.get(0).setSelected(true);
+        }
+
         for (ToggleButton b : gpuBtns) {
             boolean s  = b.isSelected();
-            String  ba = s ? (((String) b.getUserData()).startsWith("dgpu") ? "#1db954" : "#2196F3") : "#2a2a2a";
+            boolean isD = ((String) b.getUserData()).startsWith("dgpu");
+            String  ba = s ? (isD ? "#1db954" : "#2196F3") : "#2a2a2a";
+            String  bg = s ? (isD ? "#0e2018" : "#0d1b2a") : "#191919";
             b.setStyle(
-                "-fx-background-color:" + (s ? "#0e2018" : "#191919") + ";" +
+                "-fx-background-color:" + bg + ";" +
                 "-fx-border-color:" + ba + ";" +
                 "-fx-border-width:2;-fx-border-radius:8;" +
                 "-fx-background-radius:8;-fx-padding:12 18;"
@@ -931,7 +1077,14 @@ public class OnyxLauncher extends Application {
         save.setOnAction(e -> {
             settings.setCustomMcPath(pathF.getText().trim());
             Toggle selGpu = gpuGroup.getSelectedToggle();
-            if (selGpu != null) settings.setGpuMode((String) selGpu.getUserData());
+            if (selGpu != null) {
+                String chosenMode = (String) selGpu.getUserData();
+                settings.setGpuMode(chosenMode);
+                if (System.getProperty("os.name").toLowerCase().contains("win")) {
+                    int pref = chosenMode.startsWith("igpu") ? 1 : 2;
+                    GameRunner.applyWindowsGpuPreference(null, pref);
+                }
+            }
             settings.setShowAdvancedVersions(advCheck.isSelected());
             settings.save();
             buildInstall();
@@ -2236,8 +2389,48 @@ public class OnyxLauncher extends Application {
         TextField f=new TextField(val); f.setPromptText(prompt); return f;
     }
     private void alert(String title, String msg) {
-        Alert a=new Alert(Alert.AlertType.INFORMATION);
-        a.setTitle(title); a.setHeaderText(null); a.setContentText(msg); a.showAndWait();
+        if (!Platform.isFxApplicationThread()) {
+            Platform.runLater(() -> alert(title, msg));
+            return;
+        }
+        showCustomAlert(title, msg, null);
+    }
+
+    private void showCustomAlert(String title, String msg, Runnable onOk) {
+        if (!Platform.isFxApplicationThread()) {
+            Platform.runLater(() -> showCustomAlert(title, msg, onOk));
+            return;
+        }
+        if (slotOverlay.getChildren().isEmpty()) return;
+        VBox backdrop = (VBox) slotOverlay.getChildren().get(0);
+        backdrop.getChildren().clear();
+
+        VBox dlg = new VBox(16);
+        dlg.getStyleClass().add("overlay-dialog");
+        dlg.setAlignment(Pos.CENTER);
+        dlg.setMaxWidth(380);
+
+        String t = (title == null || title.isBlank()) ? "Notice" : title;
+        Label titleLbl = new Label(t);
+        titleLbl.setStyle("-fx-text-fill: white; -fx-font-size: 19px; -fx-font-weight: bold;");
+
+        Label msgLbl = new Label(msg == null ? "" : msg);
+        msgLbl.setStyle("-fx-text-fill: #a0a0ab; -fx-font-size: 13px; -fx-text-alignment: center; -fx-line-spacing: 2px;");
+        msgLbl.setWrapText(true);
+        msgLbl.setMaxWidth(320);
+
+        Button ok = btn("OK", "btn", "btn-primary");
+        ok.setMaxWidth(Double.MAX_VALUE);
+        ok.setPrefHeight(40);
+        hover(ok);
+        ok.setOnAction(ev -> {
+            slotOverlay.setVisible(false);
+            if (onOk != null) onOk.run();
+        });
+
+        dlg.getChildren().addAll(titleLbl, msgLbl, ok);
+        backdrop.getChildren().add(dlg);
+        slotOverlay.setVisible(true);
     }
 
     private void loadFont(String resourcePath) {
