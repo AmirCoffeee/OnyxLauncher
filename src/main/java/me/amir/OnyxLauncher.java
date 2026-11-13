@@ -86,6 +86,17 @@ public class OnyxLauncher extends Application {
         loadFont("/fonts/Ubuntu-Medium.ttf");
         loadFont("/fonts/Ubuntu-Bold.ttf");
 
+        // Register TwelveMonkeys WebP reader (needed in fat JAR where SPI may not auto-discover)
+        ImageIO.scanForPlugins();
+        try {
+            Class.forName("com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi");
+            javax.imageio.spi.IIORegistry registry = javax.imageio.spi.IIORegistry.getDefaultInstance();
+            registry.registerServiceProvider(
+                new com.twelvemonkeys.imageio.plugins.webp.WebPImageReaderSpi());
+        } catch (Exception e) {
+            System.err.println("WebP plugin registration: " + e.getMessage());
+        }
+
         accountPopup = popupCard();
         profilePopup = popupCard();
         popupLayer   = new AnchorPane(accountPopup, profilePopup);
@@ -1507,7 +1518,6 @@ public class OnyxLauncher extends Application {
         TabPane tabs = new TabPane();
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         tabs.getTabs().addAll(
-            contentHomeTab(),
             contentTab("Mods",           ModrinthClient.ProjectType.MOD),
             contentTab("Resource Packs", ModrinthClient.ProjectType.RESOURCEPACK),
             contentTab("Shaders",        ModrinthClient.ProjectType.SHADER),
@@ -1518,114 +1528,19 @@ public class OnyxLauncher extends Application {
         setSlot(slotContentBrowser, root);
     }
 
-    private Tab contentHomeTab() {
-        Tab tab = new Tab("Home");
-        ScrollPane scroll = new ScrollPane();
-        scroll.setFitToWidth(true);
-        scroll.getStyleClass().add("scroll-pane");
-        scroll.setStyle("-fx-background-color:#111111;");
-        VBox page = new VBox(28);
-        page.setPadding(new Insets(24, 28, 28, 28));
-        page.setStyle("-fx-background-color:#111111;");
-        scroll.setContent(page);
-        tab.setContent(scroll);
-        tab.selectedProperty().addListener((ob, o, n) -> {
-            if (!n || !page.getChildren().isEmpty()) return;
-            Label loading = new Label("Loading popular content...");
-            loading.setStyle("-fx-text-fill:#555;-fx-font-size:14px;");
-            page.getChildren().add(loading);
-            String raw = activeProfile.getVersion()
-                .replaceAll("^fabric-loader-[^-]+-", "")
-                .replaceAll("(?i)-forge-.*", "")
-                .replaceAll("(?i)^forge-", "");
-            final String mv = (raw.isBlank() || raw.contains("loader")) ? null : raw;
-            new Thread(() -> {
-                try {
-                    List<ModrinthClient.ModrinthProject> mods    = ModrinthClient.search("", ModrinthClient.ProjectType.MOD,          mv,   6);
-                    List<ModrinthClient.ModrinthProject> packs   = ModrinthClient.search("", ModrinthClient.ProjectType.MODPACK,      mv,   6);
-                    List<ModrinthClient.ModrinthProject> shaders = ModrinthClient.search("", ModrinthClient.ProjectType.SHADER,       null, 6);
-                    List<ModrinthClient.ModrinthProject> rp      = ModrinthClient.search("", ModrinthClient.ProjectType.RESOURCEPACK, null, 6);
-                    Platform.runLater(() -> {
-                        page.getChildren().clear();
-                        if (!mods.isEmpty())    page.getChildren().add(popularSection("Popular Mods",            mods,    ModrinthClient.ProjectType.MOD,          mv));
-                        if (!packs.isEmpty())   page.getChildren().add(popularSection("Popular Modpacks",        packs,   ModrinthClient.ProjectType.MODPACK,      mv));
-                        if (!shaders.isEmpty()) page.getChildren().add(popularSection("Popular Shaders",         shaders, ModrinthClient.ProjectType.SHADER,       null));
-                        if (!rp.isEmpty())      page.getChildren().add(popularSection("Popular Resource Packs",  rp,      ModrinthClient.ProjectType.RESOURCEPACK, null));
-                    });
-                } catch (Exception ex) {
-                    Platform.runLater(() -> {
-                        page.getChildren().clear();
-                        Label err = new Label("Failed to load: " + ex.getMessage());
-                        err.setStyle("-fx-text-fill:#e53935;-fx-font-size:13px;");
-                        page.getChildren().add(err);
-                    });
-                }
-            }).start();
-        });
-        return tab;
-    }
-
-    private VBox popularSection(String sectionTitle,
-                                List<ModrinthClient.ModrinthProject> items,
-                                ModrinthClient.ProjectType type,
-                                String mcVer) {
-        VBox section = new VBox(8);
-        Label hdrL = new Label(sectionTitle);
-        hdrL.setStyle("-fx-text-fill:#ffffff;-fx-font-size:15px;-fx-font-weight:bold;-fx-padding:0 0 4 0;");
-        section.getChildren().add(hdrL);
-        for (ModrinthClient.ModrinthProject item : items) {
-            HBox card = new HBox(14);
-            card.setAlignment(Pos.CENTER_LEFT);
-            card.setPadding(new Insets(11, 16, 11, 16));
-            String baseStyle =
-                "-fx-background-color:#181818;" +
-                "-fx-background-radius:8;" +
-                "-fx-border-color:#252525;" +
-                "-fx-border-radius:8;" +
-                "-fx-border-width:1;";
-            card.setStyle(baseStyle);
-            card.setOnMouseEntered(e -> card.setStyle(
-                "-fx-background-color:#1e1e1e;" +
-                "-fx-background-radius:8;" +
-                "-fx-border-color:#2e2e2e;" +
-                "-fx-border-radius:8;" +
-                "-fx-border-width:1;"));
-            card.setOnMouseExited(e -> card.setStyle(baseStyle));
-            Label nameL = new Label(item.title);
-            nameL.setStyle("-fx-text-fill:#ffffff;-fx-font-size:13px;-fx-font-weight:bold;");
-            nameL.setMaxWidth(360);
-            Label descL = new Label(item.description);
-            descL.setStyle("-fx-text-fill:#555555;-fx-font-size:11px;");
-            descL.setMaxWidth(360);
-            Label dlL = new Label("⬇  " + formatDownloads(item.downloads));
-            dlL.setStyle("-fx-text-fill:#1db954;-fx-font-size:11px;");
-            VBox info = new VBox(2, nameL, descL, dlL);
-            info.setAlignment(Pos.CENTER_LEFT);
-            HBox.setHgrow(info, Priority.ALWAYS);
-            Button installBtn = btn("Install", "btn", "btn-primary");
-            installBtn.setPrefHeight(30);
-            final String mv2 = mcVer;
-            installBtn.setOnAction(e -> handleInstall(item, mv2, type, installBtn));
-            card.getChildren().addAll(info, installBtn);
-            section.getChildren().add(card);
-        }
-        return section;
-    }
-
-
     private Tab contentTab(String label, ModrinthClient.ProjectType type) {
         Tab tab = new Tab(label);
 
         VBox box = new VBox(0);
         box.setStyle("-fx-background-color:#111111;");
 
+        // ── Filter row ────────────────────────────────────────────────────────
         HBox filterRow = new HBox(10);
         filterRow.setPadding(new Insets(14, 18, 10, 18));
         filterRow.setAlignment(Pos.CENTER_LEFT);
 
         TextField searchField = new TextField();
         searchField.setPromptText("Search " + label + "…");
-        searchField.setPrefWidth(280);
         HBox.setHgrow(searchField, Priority.ALWAYS);
 
         ComboBox<String> mcVerCombo = new ComboBox<>();
@@ -1640,89 +1555,169 @@ public class OnyxLauncher extends Application {
 
         filterRow.getChildren().addAll(searchField, mcVerCombo, searchBtn);
 
+        // ── Status label ──────────────────────────────────────────────────────
         Label statusLbl = new Label("");
-        statusLbl.setStyle("-fx-text-fill:#888;-fx-font-size:12px;-fx-padding:0 18;");
-        statusLbl.setVisible(false);
+        statusLbl.setStyle("-fx-text-fill:#666;-fx-font-size:12px;-fx-font-family:'Ubuntu';-fx-padding:0 18 4 18;");
 
+        // ── Result list ───────────────────────────────────────────────────────
         ListView<ModrinthClient.ModrinthProject> resultList = new ListView<>();
         resultList.getStyleClass().add("list-view");
+        resultList.setStyle("-fx-background-color:#111111;-fx-border-color:transparent;");
+        resultList.setFixedCellSize(140);
         VBox.setVgrow(resultList, Priority.ALWAYS);
+
         resultList.setCellFactory(lv -> new ListCell<>() {
+            private final javafx.scene.image.ImageView iconView = new javafx.scene.image.ImageView();
+            private final StackPane iconPane;
+            private final Label nameL  = new Label();
+            private final Label descL  = new Label();
+            private final Label dlL    = new Label();
+            private final Button installBtn;
+            private final HBox row;
+
+            {
+                // ── Icon 96×96 rounded ────────────────────────────────────────
+                iconView.setFitWidth(96); iconView.setFitHeight(96);
+                iconView.setPreserveRatio(false);
+                javafx.scene.shape.Rectangle clip = new javafx.scene.shape.Rectangle(96, 96);
+                clip.setArcWidth(18); clip.setArcHeight(18);
+                iconView.setClip(clip);
+
+                iconPane = new StackPane(iconView);
+                iconPane.setMinSize(96, 96); iconPane.setMaxSize(96, 96);
+                iconPane.setStyle("-fx-background-color:#1e1e1e;-fx-background-radius:18;");
+
+                // ── Text ──────────────────────────────────────────────────────
+                nameL.setStyle(
+                    "-fx-text-fill:#ffffff;-fx-font-size:16px;" +
+                    "-fx-font-weight:bold;-fx-font-family:'Ubuntu';"
+                );
+                descL.setStyle(
+                    "-fx-text-fill:#777777;-fx-font-size:13px;-fx-font-family:'Ubuntu';"
+                );
+                descL.setMaxWidth(520); descL.setWrapText(true);
+                dlL.setStyle(
+                    "-fx-text-fill:#1db954;-fx-font-size:13px;-fx-font-family:'Ubuntu';"
+                );
+
+                VBox infoBox = new VBox(6, nameL, descL, dlL);
+                infoBox.setAlignment(Pos.CENTER_LEFT);
+                HBox.setHgrow(infoBox, Priority.ALWAYS);
+
+                // ── Install button ────────────────────────────────────────────
+                installBtn = new Button("Install");
+                installBtn.setPrefHeight(42); installBtn.setPrefWidth(110);
+                installBtn.setStyle(
+                    "-fx-background-color:#1db954;-fx-text-fill:white;" +
+                    "-fx-font-weight:bold;-fx-font-size:14px;-fx-font-family:'Ubuntu';" +
+                    "-fx-background-radius:10;-fx-cursor:hand;"
+                );
+
+                row = new HBox(20, iconPane, infoBox, installBtn);
+                row.setAlignment(Pos.CENTER_LEFT);
+                row.setPadding(new Insets(16, 22, 16, 22));
+                row.setStyle(
+                    "-fx-background-color:#181818;" +
+                    "-fx-background-radius:12;" +
+                    "-fx-border-color:#232323;" +
+                    "-fx-border-radius:12;" +
+                    "-fx-border-width:1;"
+                );
+                row.setOnMouseEntered(e -> row.setStyle(
+                    "-fx-background-color:#1e1e1e;" +
+                    "-fx-background-radius:12;" +
+                    "-fx-border-color:#2e2e2e;" +
+                    "-fx-border-radius:12;" +
+                    "-fx-border-width:1;"
+                ));
+                row.setOnMouseExited(e -> row.setStyle(
+                    "-fx-background-color:#181818;" +
+                    "-fx-background-radius:12;" +
+                    "-fx-border-color:#232323;" +
+                    "-fx-border-radius:12;" +
+                    "-fx-border-width:1;"
+                ));
+            }
+
             @Override
             protected void updateItem(ModrinthClient.ModrinthProject item, boolean empty) {
                 super.updateItem(item, empty);
                 if (empty || item == null) { setGraphic(null); setText(null); return; }
-
-                Label nameL = new Label(item.title);
-                nameL.setStyle("-fx-text-fill:#ffffff;-fx-font-size:14px;-fx-font-weight:bold;");
-                nameL.setMaxWidth(340);
-
-                Label descL = new Label(item.description);
-                descL.setStyle("-fx-text-fill:#888888;-fx-font-size:11px;");
-                descL.setMaxWidth(400);
-                descL.setWrapText(false);
-
-                Label dlL = new Label("⬇  " + formatDownloads(item.downloads));
-                dlL.setStyle("-fx-text-fill:#1db954;-fx-font-size:11px;");
-
-                VBox left = new VBox(3, nameL, descL, dlL);
-                left.setAlignment(Pos.CENTER_LEFT);
-                HBox.setHgrow(left, Priority.ALWAYS);
-
-                Button installBtn = btn("Install", "btn", "btn-primary");
-                installBtn.setPrefHeight(32);
+                nameL.setText(item.title);
+                descL.setText(item.description);
+                dlL.setText("⬇  " + formatDownloads(item.downloads));
+                loadIconAsync(iconView, item.iconUrl, item.title);
                 installBtn.setOnAction(e -> handleInstall(item, mcVerCombo.getValue(), type, installBtn));
-
-                HBox row = new HBox(12, left, installBtn);
-                row.setAlignment(Pos.CENTER_LEFT);
-                row.setPadding(new Insets(8, 12, 8, 12));
                 setGraphic(row);
-                setStyle("-fx-background-color:transparent;");
+                setText(null);
+                setStyle("-fx-background-color:transparent;-fx-padding:5 18;");
             }
         });
 
+        // ── Pagination bar ────────────────────────────────────────────────────
+        final int PAGE_SIZE = 25;
+        final int[] currentPage = {1};
+        final int[] totalPages  = {1};
+        final String[] lastQuery = {""};
+
+        Button prevBtn = new Button("‹");
+        Button nextBtn = new Button("›");
+        Label pageInfo = new Label("1");
+
+        String pageBtnStyle =
+            "-fx-background-color:#1e1e1e;-fx-text-fill:#cccccc;" +
+            "-fx-font-size:16px;-fx-font-family:'Ubuntu';" +
+            "-fx-background-radius:8;-fx-pref-width:36;-fx-pref-height:36;-fx-cursor:hand;";
+        prevBtn.setStyle(pageBtnStyle);
+        nextBtn.setStyle(pageBtnStyle);
+        pageInfo.setStyle("-fx-text-fill:#1db954;-fx-font-size:13px;-fx-font-family:'Ubuntu';-fx-font-weight:bold;");
+
+        HBox pagination = new HBox(8, prevBtn, pageInfo, nextBtn);
+        pagination.setAlignment(Pos.CENTER);
+        pagination.setPadding(new Insets(10, 0, 12, 0));
+        pagination.setVisible(false);
+
         Label emptyLbl = new Label("Search for " + label.toLowerCase() + " above.");
-        emptyLbl.setStyle("-fx-text-fill:#444;-fx-font-size:14px;");
+        emptyLbl.setStyle("-fx-text-fill:#444;-fx-font-size:14px;-fx-font-family:'Ubuntu';");
         StackPane center = new StackPane(resultList, emptyLbl);
         VBox.setVgrow(center, Priority.ALWAYS);
         resultList.setVisible(false);
 
-        box.getChildren().addAll(filterRow, statusLbl, center);
+        box.getChildren().addAll(filterRow, statusLbl, center, pagination);
         tab.setContent(box);
 
-        tab.selectedProperty().addListener((ob, o, n) -> {
-            if (n && mcVerCombo.getItems().isEmpty()) {
-                new Thread(() -> {
-                    try {
-                        List<String> vers = MinecraftInstaller.fetchVersionsByType("release");
-                        Platform.runLater(() -> {
-                            mcVerCombo.setItems(FXCollections.observableArrayList(vers));
-                            if (!vers.isEmpty()) mcVerCombo.getSelectionModel().selectFirst();
-                        });
-                    } catch (Exception ignored) {}
-                }).start();
-            }
-        });
-
         AtomicBoolean searching = new AtomicBoolean(false);
-        Runnable doSearch = () -> {
+
+        // ── Load a specific page ──────────────────────────────────────────────
+        Runnable[] loadPage = {null};
+        loadPage[0] = () -> {
             if (searching.get()) return;
-            String q = searchField.getText().trim();
-            String mcVer = mcVerCombo.getValue();
             searching.set(true);
             searchBtn.setDisable(true);
-            statusLbl.setText("Searching…");
-            statusLbl.setVisible(true);
             emptyLbl.setVisible(false);
             resultList.setVisible(false);
+            int offset = (currentPage[0] - 1) * PAGE_SIZE;
+            String q = lastQuery[0];
+            String mcVer = mcVerCombo.getValue();
+
+            statusLbl.setText("Loading page " + currentPage[0] + "…");
             new Thread(() -> {
                 try {
-                    List<ModrinthClient.ModrinthProject> results =
-                        ModrinthClient.search(q.isEmpty() ? " " : q, type, mcVer, 30);
+                    List<ModrinthClient.ModrinthProject> results = q.isEmpty()
+                        ? ModrinthClient.searchPage(type, mcVer, offset, PAGE_SIZE)
+                        : ModrinthClient.searchPage(type, mcVer, q, offset, PAGE_SIZE);
+                    // Estimate total pages from offset
                     Platform.runLater(() -> {
                         resultList.setItems(FXCollections.observableArrayList(results));
                         resultList.setVisible(true);
-                        statusLbl.setText(results.size() + " results");
+                        resultList.scrollTo(0);
+                        // Update pagination
+                        if (results.size() == PAGE_SIZE) totalPages[0] = Math.max(totalPages[0], currentPage[0] + 1);
+                        pageInfo.setText(currentPage[0] + " / " + totalPages[0] + "+");
+                        prevBtn.setDisable(currentPage[0] <= 1);
+                        nextBtn.setDisable(results.size() < PAGE_SIZE);
+                        pagination.setVisible(true);
+                        statusLbl.setText((q.isEmpty() ? "Popular " : q + " — ") + results.size() + " results");
                         searching.set(false);
                         searchBtn.setDisable(false);
                     });
@@ -1736,6 +1731,36 @@ public class OnyxLauncher extends Application {
             }).start();
         };
 
+        prevBtn.setOnAction(e -> { if (currentPage[0] > 1) { currentPage[0]--; loadPage[0].run(); } });
+        nextBtn.setOnAction(e -> { currentPage[0]++; loadPage[0].run(); });
+
+        // ── Auto-load on tab open ─────────────────────────────────────────────
+        tab.selectedProperty().addListener((ob, o, n) -> {
+            if (!n) return;
+            if (mcVerCombo.getItems().isEmpty()) {
+                new Thread(() -> {
+                    try {
+                        List<String> vers = MinecraftInstaller.fetchVersionsByType("release");
+                        Platform.runLater(() -> {
+                            mcVerCombo.setItems(FXCollections.observableArrayList(vers));
+                            if (!vers.isEmpty()) mcVerCombo.getSelectionModel().selectFirst();
+                        });
+                    } catch (Exception ignored) {}
+                }).start();
+            }
+            if (resultList.getItems().isEmpty() && !searching.get()) {
+                currentPage[0] = 1; lastQuery[0] = "";
+                loadPage[0].run();
+            }
+        });
+
+        // ── Search ────────────────────────────────────────────────────────────
+        Runnable doSearch = () -> {
+            currentPage[0] = 1;
+            totalPages[0]  = 1;
+            lastQuery[0]   = searchField.getText().trim();
+            loadPage[0].run();
+        };
         searchBtn.setOnAction(e -> doSearch.run());
         searchField.setOnAction(e -> doSearch.run());
 
@@ -1843,6 +1868,95 @@ public class OnyxLauncher extends Application {
                 });
             }
         }).start();
+    }
+
+    /**
+     * Loads an image from a URL asynchronously and sets it on the given ImageView.
+     * Uses a dedicated thread with proper HTTP headers to avoid Modrinth CDN blocks.
+     */
+    private static final java.util.concurrent.ExecutorService ICON_POOL =
+        java.util.concurrent.Executors.newFixedThreadPool(16, r -> {
+            Thread t = new Thread(r, "icon-loader");
+            t.setDaemon(true);
+            return t;
+        });
+
+    // Cache: URL → Image (so same icon isn't downloaded twice)
+    private static final java.util.concurrent.ConcurrentHashMap<String, javafx.scene.image.Image>
+        ICON_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static void loadIconAsync(javafx.scene.image.ImageView iv, String url, String fallbackLetter) {
+        setLetterPlaceholder(iv, fallbackLetter);
+        if (url == null || url.isEmpty()) return;
+
+        // Tag this view with the URL it wants — used to prevent stale callbacks
+        iv.setUserData(url);
+
+        // Already cached?
+        javafx.scene.image.Image cached = ICON_CACHE.get(url);
+        if (cached != null) { iv.setImage(cached); return; }
+
+        ICON_POOL.submit(() -> {
+            try {
+                java.net.HttpURLConnection conn =
+                    (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+                conn.setRequestProperty("User-Agent", "OnyxLauncher/1.0 (contact@example.com)");
+                conn.setConnectTimeout(12_000);
+                conn.setReadTimeout(20_000);
+                conn.connect();
+                if (conn.getResponseCode() != 200) return;
+
+                byte[] bytes;
+                try (java.io.InputStream is = conn.getInputStream()) {
+                    bytes = is.readAllBytes();
+                }
+
+                // Use ImageIO (supports webp via TwelveMonkeys) → convert to JavaFX Image
+                java.awt.image.BufferedImage awtImg = ImageIO.read(
+                    new java.io.ByteArrayInputStream(bytes));
+                if (awtImg == null) return;
+
+                // Resize to 128×128 (high-res for 96px display — stays sharp)
+                java.awt.image.BufferedImage scaled = new java.awt.image.BufferedImage(128, 128,
+                    java.awt.image.BufferedImage.TYPE_INT_ARGB);
+                java.awt.Graphics2D g2 = scaled.createGraphics();
+                g2.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+                    java.awt.RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                g2.setRenderingHint(java.awt.RenderingHints.KEY_RENDERING,
+                    java.awt.RenderingHints.VALUE_RENDER_QUALITY);
+                g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                    java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.drawImage(awtImg, 0, 0, 128, 128, null);
+                g2.dispose();
+
+                // Convert AWT → JavaFX Image via PNG bytes
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                ImageIO.write(scaled, "png", baos);
+                javafx.scene.image.Image fxImg = new javafx.scene.image.Image(
+                    new java.io.ByteArrayInputStream(baos.toByteArray()));
+
+                if (!fxImg.isError()) {
+                    ICON_CACHE.put(url, fxImg);
+                    Platform.runLater(() -> {
+                        if (url.equals(iv.getUserData())) iv.setImage(fxImg);
+                    });
+                }
+            } catch (Exception ignored) {}
+        });
+    }
+
+    private static void setLetterPlaceholder(javafx.scene.image.ImageView iv, String letter) {
+        javafx.scene.canvas.Canvas c = new javafx.scene.canvas.Canvas(128, 128);
+        javafx.scene.canvas.GraphicsContext gc = c.getGraphicsContext2D();
+        gc.setFill(javafx.scene.paint.Color.web("#252525"));
+        gc.fillRoundRect(0, 0, 128, 128, 24, 24);
+        gc.setFill(javafx.scene.paint.Color.web("#555555"));
+        gc.setFont(javafx.scene.text.Font.font("Ubuntu", javafx.scene.text.FontWeight.BOLD, 52));
+        String l = (letter == null || letter.isEmpty()) ? "?" : String.valueOf(letter.charAt(0)).toUpperCase();
+        gc.fillText(l, 42, 86);
+        javafx.scene.SnapshotParameters sp = new javafx.scene.SnapshotParameters();
+        sp.setFill(javafx.scene.paint.Color.TRANSPARENT);
+        iv.setImage(c.snapshot(sp, null));
     }
 
     private static String formatDownloads(long n) {
